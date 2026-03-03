@@ -249,6 +249,72 @@ h3 {
   text-overflow: ellipsis;
 }
 
+/* AI Analysis section */
+#ai-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#ai-cached-badge {
+  font-size: 0.75em;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+#ai-loading {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+#ai-description {
+  margin: 4px 0 8px;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.ai-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+
+.ai-suggestion.warning {
+  background: var(--vscode-inputValidation-warningBackground, rgba(255, 204, 0, 0.1));
+  border-left: 2px solid var(--vscode-inputValidation-warningBorder, #cca700);
+}
+
+.ai-suggestion.info {
+  background: var(--vscode-inputValidation-infoBackground, rgba(0, 127, 212, 0.1));
+  border-left: 2px solid var(--vscode-inputValidation-infoBorder, #007fd4);
+}
+
+.ai-suggestion-icon {
+  flex-shrink: 0;
+  font-size: 0.9em;
+}
+
+.ai-category-badge {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.ai-suggestion-text {
+  flex: 1;
+}
+
 /* Props */
 #props {
   margin: 0;
