@@ -23,6 +23,12 @@ const stylesSection = document.getElementById('styles-section');
 const stylesTable = document.getElementById('styles-table');
 const propsSection = document.getElementById('props-section');
 const propsEl = document.getElementById('props');
+const aiSection = document.getElementById('ai-section');
+const aiLoading = document.getElementById('ai-loading');
+const aiContent = document.getElementById('ai-content');
+const aiDescription = document.getElementById('ai-description');
+const aiSuggestions = document.getElementById('ai-suggestions');
+const aiCachedBadge = document.getElementById('ai-cached-badge');
 
 /** @type {InspectorData | null} */
 var currentData = null;
@@ -77,6 +83,9 @@ function render(data) {
 
   // Computed styles — inline-authored properties first, with interactive editors
   renderStyles(data);
+
+  // AI Analysis
+  renderAiAnalysis(data);
 
   // Props
   var propEntries = Object.entries(data.props);
@@ -142,6 +151,60 @@ function renderStyles(data) {
     stylesTable.appendChild(
       renderStyleRow(otherEntries[j][0], otherEntries[j][1], null, data)
     );
+  }
+}
+
+/**
+ * Render the AI Analysis section.
+ * @param {InspectorData} data
+ */
+function renderAiAnalysis(data) {
+  if (!data.visualAnalysis && data.source !== 'live') {
+    // Static mode without AI — hide section
+    aiSection.hidden = true;
+    return;
+  }
+
+  if (!data.visualAnalysis) {
+    // Live mode, analysis pending — show loading
+    aiSection.hidden = false;
+    aiLoading.hidden = false;
+    aiContent.hidden = true;
+    aiCachedBadge.hidden = true;
+    return;
+  }
+
+  // Analysis available — render it
+  var analysis = data.visualAnalysis;
+  aiSection.hidden = false;
+  aiLoading.hidden = true;
+  aiContent.hidden = false;
+  aiCachedBadge.hidden = !analysis.cached;
+
+  aiDescription.textContent = analysis.description;
+  clearChildren(aiSuggestions);
+
+  for (var i = 0; i < analysis.suggestions.length; i++) {
+    var suggestion = analysis.suggestions[i];
+    var card = document.createElement('div');
+    card.className = 'ai-suggestion ' + suggestion.severity;
+
+    var icon = document.createElement('span');
+    icon.className = 'ai-suggestion-icon';
+    icon.textContent = suggestion.severity === 'warning' ? '\u26A0' : '\u2139';
+    card.appendChild(icon);
+
+    var badge = document.createElement('span');
+    badge.className = 'ai-category-badge';
+    badge.textContent = suggestion.category;
+    card.appendChild(badge);
+
+    var msg = document.createElement('span');
+    msg.className = 'ai-suggestion-text';
+    msg.textContent = suggestion.message;
+    card.appendChild(msg);
+
+    aiSuggestions.appendChild(card);
   }
 }
 
