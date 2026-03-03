@@ -48,6 +48,20 @@ export interface InlineStyleInfo {
   };
 }
 
+export interface VisualAnalysisSuggestion {
+  category: 'ux' | 'accessibility' | 'design-system' | 'visual';
+  severity: 'info' | 'warning';
+  message: string;
+  /** camelCase CSS property name, if the suggestion targets a specific style */
+  property?: string;
+}
+
+export interface VisualAnalysis {
+  description: string;
+  suggestions: VisualAnalysisSuggestion[];
+  cached: boolean;
+}
+
 /** Server → Client: inspector data ready for the webview. */
 export interface InspectorData {
   componentName: string;
@@ -61,6 +75,8 @@ export interface InspectorData {
   inlineStyles: InlineStyleInfo[];
   /** Maps kebab-case prop name → design token path (e.g. "colors.primary") */
   tokenMatches?: Record<string, string>;
+  /** AI-generated visual description and UX suggestions */
+  visualAnalysis?: VisualAnalysis;
   screenshot: string | null;
   renderedHtml: string | null;
   source: 'live' | 'estimated';

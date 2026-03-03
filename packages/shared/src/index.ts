@@ -24,6 +24,8 @@ export type {
   InspectorData,
   StyleEditParams,
   StyleEditResult,
+  VisualAnalysis,
+  VisualAnalysisSuggestion,
 } from './protocol.js';
 
 export {
