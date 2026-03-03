@@ -113,9 +113,10 @@ export async function getRawBoxModel(
  * Capture a PNG screenshot of a DOM element, cropped to its visible margin box.
  * Returns a base64-encoded PNG string, or null if the element can't be captured.
  *
- * The clip rect is intersected with the viewport to prevent Chrome from
- * physically resizing the viewport (which happens when clip extends beyond
- * the visible area, permanently breaking page layout).
+ * Strategy: capture the full viewport (no clip parameter), then crop to the
+ * element using the browser's Canvas API. The CDP `clip` parameter — even with
+ * scale: 1 and viewport-constrained rects — causes Chrome to permanently resize
+ * its viewport in headed mode, breaking page layout.
  */
 export async function captureElementScreenshot(
   client: CDPClient,
@@ -132,29 +133,56 @@ export async function captureElementScreenshot(
   try {
     await client.send('DOM.hideHighlight').catch(() => {});
 
-    // Get viewport bounds so we can constrain the clip rect
-    const metrics = (await client.send('Page.getLayoutMetrics')) as {
-      layoutViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number };
-    };
-    const vp = metrics.layoutViewport;
-    const vpRight = vp.pageX + vp.clientWidth;
-    const vpBottom = vp.pageY + vp.clientHeight;
-
-    // Clip to intersection of element margin box and visible viewport
-    const clipX = Math.max(x, vp.pageX);
-    const clipY = Math.max(y, vp.pageY);
-    const clipW = Math.min(x + width, vpRight) - clipX;
-    const clipH = Math.min(y + height, vpBottom) - clipY;
-
-    // Element is entirely off-screen
-    if (clipW <= 0 || clipH <= 0) return null;
-
-    const result = (await client.send('Page.captureScreenshot', {
+    // Step 1: Capture full viewport — never use clip (causes viewport corruption)
+    const screenshot = (await client.send('Page.captureScreenshot', {
       format: 'png',
-      clip: { x: clipX, y: clipY, width: clipW, height: clipH, scale: 1 },
     })) as { data: string };
-    return result.data;
+
+    // Step 2: Crop to element bounds using browser Canvas API.
+    // Screenshot is at device pixel ratio; box model coords are page-space CSS pixels.
+    // Subtract scroll offset to convert page coords → viewport-relative coords.
+    const cropResult = (await client.send('Runtime.evaluate', {
+      expression: buildCropExpression(screenshot.data, x, y, width, height),
+      returnByValue: true,
+      awaitPromise: true,
+    })) as { result: { value?: string | null }; exceptionDetails?: unknown };
+
+    if (cropResult.exceptionDetails || !cropResult.result.value) {
+      return screenshot.data;
+    }
+
+    return cropResult.result.value;
   } catch {
     return null;
   }
+}
+
+function buildCropExpression(
+  base64: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): string {
+  return `(async function() {
+  var img = new Image();
+  await new Promise(function(r, j) { img.onload = r; img.onerror = j; img.src = 'data:image/png;base64,${base64}'; });
+  var dpr = window.devicePixelRatio || 1;
+  var sx = window.scrollX || 0;
+  var sy = window.scrollY || 0;
+  var cx = Math.round((${x} - sx) * dpr);
+  var cy = Math.round((${y} - sy) * dpr);
+  var cw = Math.round(${w} * dpr);
+  var ch = Math.round(${h} * dpr);
+  if (cx < 0) { cw += cx; cx = 0; }
+  if (cy < 0) { ch += cy; cy = 0; }
+  if (cx + cw > img.width) cw = img.width - cx;
+  if (cy + ch > img.height) ch = img.height - cy;
+  if (cw <= 0 || ch <= 0) return null;
+  var canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  canvas.getContext('2d').drawImage(img, cx, cy, cw, ch, 0, 0, cw, ch);
+  return canvas.toDataURL('image/png').split(',')[1];
+})()`;
 }
