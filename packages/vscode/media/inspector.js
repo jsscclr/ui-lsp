@@ -159,14 +159,14 @@ function renderStyles(data) {
  * @param {InspectorData} data
  */
 function renderAiAnalysis(data) {
-  if (!data.visualAnalysis && data.source !== 'live') {
-    // Static mode without AI — hide section
+  if (!data.visualAnalysis && (data.source !== 'live' || !data.screenshot)) {
+    // No AI analysis available and none expected — hide section
     aiSection.hidden = true;
     return;
   }
 
   if (!data.visualAnalysis) {
-    // Live mode, analysis pending — show loading
+    // Live mode with screenshot, analysis pending — show loading
     aiSection.hidden = false;
     aiLoading.hidden = false;
     aiContent.hidden = true;
