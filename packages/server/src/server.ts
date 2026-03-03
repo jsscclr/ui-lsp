@@ -11,6 +11,8 @@ import { JsxAnalyzer } from './static/jsx-analyzer.js';
 import { HoverProvider } from './hover/hover-provider.js';
 import { CodeLensProvider } from './codelens/codelens-provider.js';
 import { InlayHintProvider } from './inlay-hints/inlay-hint-provider.js';
+import { ColorProvider } from './color/color-provider.js';
+import { DiagnosticsProvider } from './diagnostics/diagnostics-provider.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
@@ -22,6 +24,8 @@ let cdpConnection: CDPConnection;
 let hoverProvider: HoverProvider;
 let codeLensProvider: CodeLensProvider;
 let inlayHintProvider: InlayHintProvider;
+const colorProvider = new ColorProvider(jsxAnalyzer);
+const diagnosticsProvider = new DiagnosticsProvider(jsxAnalyzer);
 
 function createProviders(cdp: CDPConnection): void {
   hoverProvider = new HoverProvider(jsxAnalyzer, cdp);
@@ -59,6 +63,7 @@ connection.onInitialize((params): InitializeResult => {
       hoverProvider: true,
       codeLensProvider: { resolveProvider: true },
       inlayHintProvider: {},
+      colorProvider: true,
     },
   };
 });
@@ -71,8 +76,13 @@ function uriToPath(uri: string): string {
 }
 
 function updateDocument(uri: string, content: string): void {
-  jsxAnalyzer.updateFile(uriToPath(uri), content);
-  hoverProvider.invalidate(uriToPath(uri));
+  const filePath = uriToPath(uri);
+  jsxAnalyzer.updateFile(filePath, content);
+  hoverProvider.invalidate(filePath);
+
+  // Push diagnostics for style issues
+  const diagnostics = diagnosticsProvider.validate(uri, filePath);
+  connection.sendDiagnostics({ uri, diagnostics });
 }
 
 connection.onDidOpenTextDocument((params) => {
@@ -104,6 +114,7 @@ connection.onDidChangeTextDocument((params) => {
 connection.onDidCloseTextDocument((params) => {
   documents.delete(params.textDocument.uri);
   jsxAnalyzer.removeFile(uriToPath(params.textDocument.uri));
+  connection.sendDiagnostics({ uri: params.textDocument.uri, diagnostics: [] });
 });
 
 connection.onHover((params) => {
@@ -120,6 +131,14 @@ connection.onCodeLensResolve((lens) => {
 
 connection.languages.inlayHint.on((params) => {
   return inlayHintProvider.onInlayHint(params);
+});
+
+connection.onDocumentColor((params) => {
+  return colorProvider.onDocumentColor(params);
+});
+
+connection.onColorPresentation((params) => {
+  return colorProvider.onColorPresentation(params);
 });
 
 // Custom requests for connect/disconnect commands
