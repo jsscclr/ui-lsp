@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.moon/cache/
+.moon/docker/
+.vscode/*.log
+*.vsix

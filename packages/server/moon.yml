@@ -1,0 +1,21 @@
+tasks:
+  build:
+    command: pnpm build
+    inputs:
+      - 'src/**/*'
+    outputs:
+      - 'dist'
+    deps:
+      - 'shared:build'
+  typecheck:
+    command: pnpm typecheck
+    inputs:
+      - 'src/**/*'
+    deps:
+      - 'shared:typecheck'
+  test:
+    command: pnpm vitest run
+    inputs:
+      - 'src/**/*'
+    deps:
+      - 'shared:build'

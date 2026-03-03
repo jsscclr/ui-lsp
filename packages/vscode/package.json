@@ -1,0 +1,65 @@
+{
+  "name": "@ui-ls/vscode",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "displayName": "UI Language Server",
+  "description": "Live layout and style inspection for React components",
+  "publisher": "ui-language-server",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "UI Language Server",
+      "properties": {
+        "uiLanguageServer.chromeDebugPort": {
+          "type": "number",
+          "default": 9222,
+          "description": "Chrome remote debugging port"
+        },
+        "uiLanguageServer.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-connect to Chrome on activation"
+        },
+        "uiLanguageServer.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the UI Language Server"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "uiLanguageServer.connect",
+        "title": "UI Language Server: Connect to Chrome"
+      },
+      {
+        "command": "uiLanguageServer.disconnect",
+        "title": "UI Language Server: Disconnect from Chrome"
+      },
+      {
+        "command": "uiLanguageServer.showStatus",
+        "title": "UI Language Server: Show Connection Status"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ui-ls/shared": "workspace:*",
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0"
+  }
+}

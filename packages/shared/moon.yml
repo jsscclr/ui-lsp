@@ -1,0 +1,15 @@
+tasks:
+  build:
+    command: pnpm build
+    inputs:
+      - 'src/**/*'
+    outputs:
+      - 'dist'
+  typecheck:
+    command: pnpm typecheck
+    inputs:
+      - 'src/**/*'
+  test:
+    command: pnpm vitest run
+    inputs:
+      - 'src/**/*'
