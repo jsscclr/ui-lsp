@@ -5,15 +5,18 @@ import dts from 'vite-plugin-dts';
 export default defineConfig({
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
+      entry: {
+        index: resolve(__dirname, 'src/index.ts'),
+        server: resolve(__dirname, 'src/server.ts'),
+      },
       formats: ['es'],
-      fileName: 'index',
     },
     rollupOptions: {
       external: [
         'vscode-languageserver',
         'vscode-languageserver-textdocument',
         'vscode-languageserver/node',
+        'vscode-languageserver/node.js',
         'ws',
         'ts-morph',
         'yoga-layout',
