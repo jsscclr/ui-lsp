@@ -116,6 +116,10 @@ export async function getRawBoxModel(
  * Capture a PNG screenshot of a single DOM element, clipped to its margin box.
  * Returns a base64-encoded PNG string, or null if the element can't be captured.
  * Accepts a pre-fetched CDPBoxModel to avoid duplicate DOM.getBoxModel calls.
+ *
+ * IMPORTANT: clip.scale is "Page scale factor" — setting it below 1 causes Chrome
+ * to physically resize the viewport, breaking page layout. Always use scale: 1.
+ * Use fromSurface to capture from the compositor without viewport side effects.
  */
 export async function captureElementScreenshot(
   client: CDPClient,
@@ -128,13 +132,9 @@ export async function captureElementScreenshot(
   const width = mq[2] - mq[0];
   const height = mq[5] - mq[1];
 
-  // Skip zero-size elements
+  // Skip zero-size or excessively large elements
   if (width <= 0 || height <= 0) return null;
-
-  // Scale down if element exceeds max dimensions
-  let scale = 1;
-  if (width > MAX_SCREENSHOT_WIDTH) scale = Math.min(scale, MAX_SCREENSHOT_WIDTH / width);
-  if (height > MAX_SCREENSHOT_HEIGHT) scale = Math.min(scale, MAX_SCREENSHOT_HEIGHT / height);
+  if (width > MAX_SCREENSHOT_WIDTH || height > MAX_SCREENSHOT_HEIGHT) return null;
 
   try {
     // Clear any DOM inspection highlight overlay before capturing
@@ -142,7 +142,9 @@ export async function captureElementScreenshot(
 
     const result = (await client.send('Page.captureScreenshot', {
       format: 'png',
-      clip: { x, y, width, height, scale },
+      clip: { x, y, width, height, scale: 1 },
+      fromSurface: true,
+      captureBeyondViewport: false,
     })) as { data: string };
     return result.data;
   } catch {
