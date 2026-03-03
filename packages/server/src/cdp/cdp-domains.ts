@@ -100,8 +100,8 @@ export async function getDocument(client: CDPClient): Promise<number> {
   return result.root.nodeId;
 }
 
-const MAX_SCREENSHOT_WIDTH = 600;
-const MAX_SCREENSHOT_HEIGHT = 400;
+const MAX_SCREENSHOT_WIDTH = 1920;
+const MAX_SCREENSHOT_HEIGHT = 1200;
 
 /** Fetch the raw CDP box model for a node. */
 export async function getRawBoxModel(

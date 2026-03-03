@@ -77,6 +77,10 @@ export class CDPConnection {
       await client.send('CSS.enable');
       await client.send('Runtime.enable');
 
+      // Reset page scale factor in case a previous session corrupted it
+      // (e.g., Page.captureScreenshot with clip.scale < 1)
+      await client.send('Emulation.resetPageScaleFactor').catch(() => {});
+
       // Inject a minimal React DevTools hook so React registers fiber roots,
       // even if the React DevTools extension isn't installed.
       // This runs before any JS on future page loads.
