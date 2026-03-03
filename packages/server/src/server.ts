@@ -3,6 +3,7 @@ import {
   ProposedFeatures,
   TextDocumentSyncKind,
   type InitializeResult,
+  type Diagnostic,
 } from 'vscode-languageserver/node.js';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import {
@@ -21,6 +22,8 @@ import { InlayHintProvider } from './inlay-hints/inlay-hint-provider.js';
 import { ColorProvider } from './color/color-provider.js';
 import { DiagnosticsProvider } from './diagnostics/diagnostics-provider.js';
 import { InspectorProvider } from './inspector/inspector-provider.js';
+import { CodeActionProvider } from './code-actions/code-action-provider.js';
+import { LiveDiagnosticsProvider } from './diagnostics/live-diagnostics-provider.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
@@ -34,8 +37,15 @@ let hoverProvider: HoverProvider;
 let codeLensProvider: CodeLensProvider;
 let inlayHintProvider: InlayHintProvider;
 let inspectorProvider: InspectorProvider;
+let liveDiagnosticsProvider: LiveDiagnosticsProvider;
 const colorProvider = new ColorProvider(jsxAnalyzer);
 const diagnosticsProvider = new DiagnosticsProvider(jsxAnalyzer);
+const codeActionProvider = new CodeActionProvider();
+
+// Per-URI live diagnostics cache, merged with static on each publish
+const liveDiagnosticsCache = new Map<string, Diagnostic[]>();
+const liveValidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const LIVE_VALIDATE_DEBOUNCE = 2_000;
 
 function createProviders(cdp: CDPConnection): void {
   sourceMapper = new SourceMapper();
@@ -48,6 +58,21 @@ function createProviders(cdp: CDPConnection): void {
     () => cdpConnection,
     (data) => connection.sendNotification(InspectorDataMethod, data),
   );
+  liveDiagnosticsProvider = new LiveDiagnosticsProvider(
+    jsxAnalyzer,
+    sourceMapper,
+    () => cdpConnection,
+  );
+
+  // Cursor-scoped live diagnostics: piggyback on InspectorProvider's lookup
+  inspectorProvider.onLiveData = (event) => {
+    const liveDiags = liveDiagnosticsProvider.diagnosticsForElement(
+      event.uri, event.line, event.column,
+      event.boxModel, event.computedStyles,
+    );
+    liveDiagnosticsCache.set(event.uri, liveDiags);
+    publishMergedDiagnostics(event.uri);
+  };
 }
 
 connection.onInitialize((params): InitializeResult => {
@@ -65,6 +90,14 @@ connection.onInitialize((params): InitializeResult => {
   // Forward connection state changes as custom notifications
   cdpConnection.onStateChange((state, error) => {
     connection.sendNotification(ConnectionStatusMethod, { state, port, error });
+
+    // On disconnect, clear live diagnostics and re-publish static-only
+    if (state === 'disconnected') {
+      for (const [uri] of liveDiagnosticsCache) {
+        liveDiagnosticsCache.delete(uri);
+        publishMergedDiagnostics(uri);
+      }
+    }
   });
 
   // Auto-connect to Chrome if configured
@@ -81,6 +114,7 @@ connection.onInitialize((params): InitializeResult => {
       codeLensProvider: { resolveProvider: true },
       inlayHintProvider: {},
       colorProvider: true,
+      codeActionProvider: { codeActionKinds: ['quickfix'] },
     },
   };
 });
@@ -92,14 +126,40 @@ function uriToPath(uri: string): string {
   return uri;
 }
 
+function publishMergedDiagnostics(uri: string): void {
+  const filePath = uriToPath(uri);
+  const staticDiags = diagnosticsProvider.validate(uri, filePath);
+  const liveDiags = liveDiagnosticsCache.get(uri) ?? [];
+  connection.sendDiagnostics({ uri, diagnostics: [...staticDiags, ...liveDiags] });
+}
+
+function scheduleLiveValidation(uri: string): void {
+  const existing = liveValidateTimers.get(uri);
+  if (existing) clearTimeout(existing);
+
+  liveValidateTimers.set(uri, setTimeout(async () => {
+    liveValidateTimers.delete(uri);
+    const filePath = uriToPath(uri);
+    try {
+      const liveDiags = await liveDiagnosticsProvider.validateFile(uri, filePath);
+      liveDiagnosticsCache.set(uri, liveDiags);
+      publishMergedDiagnostics(uri);
+    } catch {
+      // CDP unavailable — keep whatever we had
+    }
+  }, LIVE_VALIDATE_DEBOUNCE));
+}
+
 function updateDocument(uri: string, content: string): void {
   const filePath = uriToPath(uri);
   jsxAnalyzer.updateFile(filePath, content);
   hoverProvider.invalidate(filePath);
 
-  // Push diagnostics for style issues
-  const diagnostics = diagnosticsProvider.validate(uri, filePath);
-  connection.sendDiagnostics({ uri, diagnostics });
+  // Publish static diagnostics immediately (merged with any cached live)
+  publishMergedDiagnostics(uri);
+
+  // Schedule debounced live validation
+  scheduleLiveValidation(uri);
 }
 
 connection.onDidOpenTextDocument((params) => {
@@ -129,9 +189,13 @@ connection.onDidChangeTextDocument((params) => {
 });
 
 connection.onDidCloseTextDocument((params) => {
-  documents.delete(params.textDocument.uri);
-  jsxAnalyzer.removeFile(uriToPath(params.textDocument.uri));
-  connection.sendDiagnostics({ uri: params.textDocument.uri, diagnostics: [] });
+  const uri = params.textDocument.uri;
+  documents.delete(uri);
+  jsxAnalyzer.removeFile(uriToPath(uri));
+  liveDiagnosticsCache.delete(uri);
+  const timer = liveValidateTimers.get(uri);
+  if (timer) { clearTimeout(timer); liveValidateTimers.delete(uri); }
+  connection.sendDiagnostics({ uri, diagnostics: [] });
 });
 
 connection.onHover((params) => {
@@ -156,6 +220,10 @@ connection.onDocumentColor((params) => {
 
 connection.onColorPresentation((params) => {
   return colorProvider.onColorPresentation(params);
+});
+
+connection.onCodeAction((params) => {
+  return codeActionProvider.onCodeAction(params);
 });
 
 // Custom notification: cursor position from the extension

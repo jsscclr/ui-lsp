@@ -1,4 +1,4 @@
-import { type Diagnostic, DiagnosticSeverity } from 'vscode-languageserver';
+import { type Diagnostic, DiagnosticSeverity, type Range } from 'vscode-languageserver';
 import {
   SyntaxKind,
   type SourceFile,
@@ -7,6 +7,7 @@ import {
   type JsxAttribute,
 } from 'ts-morph';
 import type { JsxAnalyzer } from '../static/jsx-analyzer.js';
+import type { DiagnosticData, StyleAttrData } from './diagnostic-data.js';
 
 const FLEX_CHILD_PROPERTIES = new Set([
   'flexDirection', 'flexWrap', 'justifyContent', 'alignItems', 'alignContent', 'gap',
@@ -28,10 +29,11 @@ export class DiagnosticsProvider {
 
     for (const styleObj of findStyleObjects(source)) {
       const props = extractPropertyMap(styleObj);
+      const styleAttr = buildStyleAttrData(styleObj, props);
       diagnostics.push(
-        ...checkFlexPropertiesWithoutDisplay(props),
-        ...checkWidthWithFlex(props),
-        ...checkConflictingDimensions(props),
+        ...checkFlexPropertiesWithoutDisplay(props, styleAttr),
+        ...checkWidthWithFlex(props, styleAttr),
+        ...checkConflictingDimensions(props, styleAttr),
       );
     }
 
@@ -39,13 +41,13 @@ export class DiagnosticsProvider {
   }
 }
 
-interface StyleProp {
+export interface StyleProp {
   name: string;
   value: string;
   assignment: PropertyAssignment;
 }
 
-function findStyleObjects(source: SourceFile): ObjectLiteralExpression[] {
+export function findStyleObjects(source: SourceFile): ObjectLiteralExpression[] {
   const results: ObjectLiteralExpression[] = [];
 
   const allJsx = [
@@ -75,7 +77,7 @@ function getObjectLiteral(jsxAttr: JsxAttribute): ObjectLiteralExpression | null
   return expr.asKind(SyntaxKind.ObjectLiteralExpression)!;
 }
 
-function extractPropertyMap(objLiteral: ObjectLiteralExpression): Map<string, StyleProp> {
+export function extractPropertyMap(objLiteral: ObjectLiteralExpression): Map<string, StyleProp> {
   const props = new Map<string, StyleProp>();
 
   for (const prop of objLiteral.getProperties()) {
@@ -101,29 +103,69 @@ function extractPropertyMap(objLiteral: ObjectLiteralExpression): Map<string, St
   return props;
 }
 
-function makeDiagnostic(assignment: PropertyAssignment, message: string): Diagnostic {
-  const source = assignment.getSourceFile();
-  const start = assignment.getStartLineNumber() - 1;
-  const startCol = assignment.getStart() - assignment.getStartLinePos();
-  const end = assignment.getEndLineNumber() - 1;
-  const endPos = assignment.getEnd();
-  const endLineAndChar = source.compilerNode.getLineAndCharacterOfPosition(endPos);
+/** Build StyleAttrData from a style={{...}} ObjectLiteralExpression node. */
+export function buildStyleAttrData(
+  objLiteral: ObjectLiteralExpression,
+  props: Map<string, StyleProp>,
+): StyleAttrData {
+  const source = objLiteral.getSourceFile();
+
+  const objStart = objLiteral.getStart();
+  const objStartLine = objLiteral.getStartLineNumber() - 1;
+  const objStartCol = objStart - objLiteral.getStartLinePos();
+
+  const objEnd = objLiteral.getEnd();
+  const objEndLC = source.compilerNode.getLineAndCharacterOfPosition(objEnd);
+
+  const existingProps: StyleAttrData['existingProps'] = [];
+  for (const [, prop] of props) {
+    existingProps.push({
+      name: prop.name,
+      value: prop.value,
+      range: nodeRange(prop.assignment),
+    });
+  }
 
   return {
-    range: {
-      start: { line: start, character: startCol },
-      end: { line: end, character: endLineAndChar.character },
-    },
+    objLiteralStart: { line: objStartLine, character: objStartCol },
+    objLiteralEnd: { line: objEndLC.line, character: objEndLC.character },
+    existingProps,
+  };
+}
+
+function nodeRange(node: PropertyAssignment): Range {
+  const source = node.getSourceFile();
+  const start = node.getStartLineNumber() - 1;
+  const startCol = node.getStart() - node.getStartLinePos();
+  const endPos = node.getEnd();
+  const endLC = source.compilerNode.getLineAndCharacterOfPosition(endPos);
+  return {
+    start: { line: start, character: startCol },
+    end: { line: endLC.line, character: endLC.character },
+  };
+}
+
+function makeDiagnostic(
+  assignment: PropertyAssignment,
+  message: string,
+  data: DiagnosticData,
+): Diagnostic {
+  return {
+    range: nodeRange(assignment),
     message,
     severity: DiagnosticSeverity.Warning,
     source: 'ui-ls',
+    data,
   };
 }
 
 /**
  * Rule: flexDirection/justifyContent/alignItems etc. without display:'flex'
  */
-function checkFlexPropertiesWithoutDisplay(props: Map<string, StyleProp>): Diagnostic[] {
+function checkFlexPropertiesWithoutDisplay(
+  props: Map<string, StyleProp>,
+  styleAttr: StyleAttrData,
+): Diagnostic[] {
   const displayProp = props.get('display');
   const isFlex = displayProp && (displayProp.value === 'flex' || displayProp.value === 'inline-flex');
 
@@ -136,6 +178,7 @@ function checkFlexPropertiesWithoutDisplay(props: Map<string, StyleProp>): Diagn
         makeDiagnostic(
           prop.assignment,
           `'${name}' has no effect without 'display: flex' on this element.`,
+          { ruleId: 'flex-without-display', styleAttr, fixContext: { propName: name } },
         ),
       );
     }
@@ -146,7 +189,10 @@ function checkFlexPropertiesWithoutDisplay(props: Map<string, StyleProp>): Diagn
 /**
  * Rule: width set alongside flex shorthand (flex: 1, flex: '1 1 0%', etc.)
  */
-function checkWidthWithFlex(props: Map<string, StyleProp>): Diagnostic[] {
+function checkWidthWithFlex(
+  props: Map<string, StyleProp>,
+  styleAttr: StyleAttrData,
+): Diagnostic[] {
   const flexProp = props.get('flex');
   const widthProp = props.get('width');
 
@@ -161,6 +207,7 @@ function checkWidthWithFlex(props: Map<string, StyleProp>): Diagnostic[] {
     makeDiagnostic(
       widthProp.assignment,
       `'width' may be ignored because 'flex: ${flexProp.value}' controls this element's size.`,
+      { ruleId: 'width-with-flex', styleAttr, fixContext: {} },
     ),
   ];
 }
@@ -168,11 +215,14 @@ function checkWidthWithFlex(props: Map<string, StyleProp>): Diagnostic[] {
 /**
  * Rule: minWidth > width (conflicting constraints)
  */
-function checkConflictingDimensions(props: Map<string, StyleProp>): Diagnostic[] {
+function checkConflictingDimensions(
+  props: Map<string, StyleProp>,
+  styleAttr: StyleAttrData,
+): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
 
-  checkDimensionPair(props, 'width', 'minWidth', diagnostics);
-  checkDimensionPair(props, 'height', 'minHeight', diagnostics);
+  checkDimensionPair(props, 'width', 'minWidth', styleAttr, diagnostics);
+  checkDimensionPair(props, 'height', 'minHeight', styleAttr, diagnostics);
 
   return diagnostics;
 }
@@ -181,6 +231,7 @@ function checkDimensionPair(
   props: Map<string, StyleProp>,
   dimName: string,
   minName: string,
+  styleAttr: StyleAttrData,
   diagnostics: Diagnostic[],
 ): void {
   const dim = props.get(dimName);
@@ -196,6 +247,7 @@ function checkDimensionPair(
       makeDiagnostic(
         min.assignment,
         `'${minName}: ${min.value}' is larger than '${dimName}: ${dim.value}' — the element will be forced to ${minPx}px.`,
+        { ruleId: 'conflicting-dimensions', styleAttr, fixContext: { dimName, minName } },
       ),
     );
   }

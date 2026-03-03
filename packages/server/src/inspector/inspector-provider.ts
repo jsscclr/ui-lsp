@@ -1,9 +1,17 @@
-import type { CursorPositionParams, InspectorData, ComputedStyles } from '@ui-ls/shared';
+import type { CursorPositionParams, InspectorData, ComputedStyles, BoxModelData } from '@ui-ls/shared';
 import type { CDPConnection } from '../cdp/cdp-connection.js';
 import { SourceMapper } from '../source-mapping/source-mapper.js';
 import { JsxAnalyzer } from '../static/jsx-analyzer.js';
 import { extractInlineStyles } from '../static/style-extractor.js';
 import { estimateLayout } from '../static/layout-estimator.js';
+
+export interface LiveDataEvent {
+  uri: string;
+  line: number;
+  column: number;
+  boxModel: BoxModelData;
+  computedStyles: ComputedStyles;
+}
 
 /**
  * Handles ui-ls/cursorPosition notifications.
@@ -14,6 +22,9 @@ export class InspectorProvider {
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private generation = 0;
   private lastKey = '';
+
+  /** Optional callback fired when live data arrives for the cursor element. */
+  onLiveData: ((event: LiveDataEvent) => void) | null = null;
 
   constructor(
     private jsxAnalyzer: JsxAnalyzer,
@@ -51,7 +62,7 @@ export class InspectorProvider {
     }
 
     // Try live data first, fall back to static
-    this.resolveLive(filePath, line, col, componentInfo.name, gen)
+    this.resolveLive(params.uri, filePath, line, col, componentInfo.name, gen)
       .then((data) => {
         if (this.generation !== gen) return; // stale
         if (data) {
@@ -67,6 +78,7 @@ export class InspectorProvider {
   }
 
   private async resolveLive(
+    uri: string,
     filePath: string,
     line: number,
     col: number,
@@ -78,6 +90,15 @@ export class InspectorProvider {
 
     const liveData = await this.sourceMapper.lookupLive(client, filePath, line, col, componentName);
     if (!liveData || this.generation !== gen) return null;
+
+    // Fire live data event for live diagnostics (zero extra CDP cost)
+    this.onLiveData?.({
+      uri,
+      line,
+      column: col,
+      boxModel: liveData.boxModel,
+      computedStyles: liveData.computedStyles,
+    });
 
     return {
       componentName: liveData.componentInfo.name,
