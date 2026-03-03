@@ -28,6 +28,7 @@ export class HoverProvider {
     const filePath = uriToPath(uri);
     this.jsxAnalyzer.updateFile(filePath, content);
     this.hoverCache.invalidate();
+    this.invalidateBrowserSourceMapCache(filePath);
   }
 
   removeDocument(uri: string): void {
@@ -113,6 +114,29 @@ export class HoverProvider {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Clear the browser-side source map cache for a file that changed.
+   * The cache key is a browser URL, so we match by file suffix.
+   */
+  private invalidateBrowserSourceMapCache(filePath: string): void {
+    const client = this.connection.cdpClient;
+    if (!client) return;
+
+    const suffix = filePath.split('/').slice(-2).join('/');
+    const escapedSuffix = suffix.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    client.send('Runtime.evaluate', {
+      expression: `(function() {
+        var c = window.__UI_LS_SM_CACHE__;
+        if (!c) return;
+        Object.keys(c).forEach(function(k) {
+          if (k.indexOf('${escapedSuffix}') !== -1) delete c[k];
+        });
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+    }).catch(() => {});
   }
 }
 

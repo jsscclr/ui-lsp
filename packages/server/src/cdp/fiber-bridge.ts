@@ -48,6 +48,10 @@ export function buildFiberLookupExpression(
 
   // --- React 19 path: resolve via source map ---
 
+  // Persistent cache: URL → { orig2gen: { origLine: [genLine, ...] } }
+  if (!window.__UI_LS_SM_CACHE__) window.__UI_LS_SM_CACHE__ = {};
+  var smCache = window.__UI_LS_SM_CACHE__;
+
   // Parse a stack frame URL + line:col (handles port numbers in URLs)
   function parseFrame(frame) {
     var m = frame.match(/(https?:\\/\\/\\S+?):(\\d+):(\\d+)/);
@@ -55,19 +59,24 @@ export function buildFiberLookupExpression(
     return { url: m[1], line: parseInt(m[2], 10) };
   }
 
-  // Get the first non-React stack frame from a fiber
+  // Get the first non-React stack frame from a fiber, with per-fiber cache
   function getFiberFrame(fiber) {
-    if (!fiber._debugStack || !fiber._debugStack.stack) return null;
-    var lines = fiber._debugStack.stack.split('\\n');
-    for (var i = 1; i < lines.length; i++) {
-      var f = lines[i];
-      if (f.indexOf('jsx-dev-runtime') !== -1 ||
-          f.indexOf('react-dom') !== -1 ||
-          f.indexOf('react.development') !== -1 ||
-          (f.indexOf('chunk-') !== -1 && f.indexOf('react') !== -1)) continue;
-      return parseFrame(f);
+    if (fiber.__uiLsFrame !== undefined) return fiber.__uiLsFrame;
+    var result = null;
+    if (fiber._debugStack && fiber._debugStack.stack) {
+      var lines = fiber._debugStack.stack.split('\\n');
+      for (var i = 1; i < lines.length; i++) {
+        var f = lines[i];
+        if (f.indexOf('jsx-dev-runtime') !== -1 ||
+            f.indexOf('react-dom') !== -1 ||
+            f.indexOf('react.development') !== -1 ||
+            (f.indexOf('chunk-') !== -1 && f.indexOf('react') !== -1)) continue;
+        result = parseFrame(f);
+        break;
+      }
     }
-    return null;
+    fiber.__uiLsFrame = result;
+    return result;
   }
 
   // Step 1: Find the browser URL for our target file by scanning fiber stacks
@@ -85,19 +94,23 @@ export function buildFiberLookupExpression(
   hook.getFiberRoots(1).forEach(function(root) { findUrl(root.current); });
   if (!browserUrl) return { found: false };
 
-  // Step 2: Fetch source and decode inline source map
-  var genLines = null;
-  try {
-    var resp = await fetch(browserUrl);
-    var text = await resp.text();
-    var smMatch = text.match(/\\/\\/# sourceMappingURL=data:application\\/json;base64,([^\\s]+)/);
-    if (smMatch) {
-      var map = JSON.parse(atob(smMatch[1]));
-      genLines = resolveLines(map.mappings, targetOrigLine);
-    }
-  } catch(e) {}
+  // Step 2: Get source map line mapping (cached per URL)
+  var lineMap = smCache[browserUrl];
+  if (!lineMap) {
+    try {
+      var resp = await fetch(browserUrl);
+      var text = await resp.text();
+      var smMatch = text.match(/\\/\\/# sourceMappingURL=data:application\\/json;base64,([^\\s]+)/);
+      if (smMatch) {
+        var map = JSON.parse(atob(smMatch[1]));
+        lineMap = buildLineMap(map.mappings);
+        smCache[browserUrl] = lineMap;
+      }
+    } catch(e) {}
+  }
 
-  if (!genLines || genLines.length === 0) return { found: false };
+  var genLines = lineMap ? (lineMap[targetOrigLine] || []) : [];
+  if (genLines.length === 0) return { found: false };
 
   // Step 3: Walk fibers matching against resolved generated lines
   // Generated lines from source map are 0-based; stack trace lines are 1-based
@@ -153,8 +166,8 @@ export function buildFiberLookupExpression(
     return { found: true, props: props, componentName: name };
   }
 
-  // Minimal VLQ source map decoder — resolves original line to generated line(s)
-  function resolveLines(mappings, origLine) {
+  // Minimal VLQ source map decoder — builds full original→generated line map
+  function buildLineMap(mappings) {
     var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     function vlq(s) {
       var r = [], sh = 0, v = 0;
@@ -168,7 +181,7 @@ export function buildFiberLookupExpression(
       }
       return r;
     }
-    var result = [];
+    var o2g = {}; // originalLine → [generatedLine, ...]
     var srcIdx = 0, oLine = 0, oCol = 0;
     var lines = mappings.split(';');
     for (var g = 0; g < lines.length; g++) {
@@ -183,13 +196,14 @@ export function buildFiberLookupExpression(
           srcIdx += d[1];
           oLine += d[2];
           oCol += d[3];
-          if (srcIdx === 0 && oLine === origLine && result.indexOf(g) === -1) {
-            result.push(g);
+          if (srcIdx === 0) {
+            if (!o2g[oLine]) o2g[oLine] = [];
+            if (o2g[oLine].indexOf(g) === -1) o2g[oLine].push(g);
           }
         }
       }
     }
-    return result;
+    return o2g;
   }
 })()`;
 }
