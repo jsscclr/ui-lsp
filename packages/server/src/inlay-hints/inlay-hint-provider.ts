@@ -17,6 +17,15 @@ interface StyleProperty {
   endColumn: number;
 }
 
+/** A group of style properties belonging to a single JSX element. */
+interface StylePropertyGroup {
+  /** 0-based line of the owning JSX element's opening tag */
+  elementLine: number;
+  /** Column of the `<` in the opening tag */
+  elementColumn: number;
+  properties: StyleProperty[];
+}
+
 /**
  * Provides inlay hints next to inline style properties showing computed values.
  * Only shows hints when the computed value differs from the source literal.
@@ -36,72 +45,66 @@ export class InlayHintProvider {
     const source = this.jsxAnalyzer.getSourceFile(filePath);
     if (!source) return [];
 
-    // Find style properties in the visible range
-    const styleProps = findStyleProperties(source, params.range.start.line, params.range.end.line);
-    if (styleProps.length === 0) return [];
+    // Find style properties grouped by their owning JSX element
+    const groups = findStylePropertyGroups(source, params.range.start.line, params.range.end.line);
+    if (groups.length === 0) return [];
 
-    // Get computed styles from the browser for components in this range
-    const computedByLine = await this.getComputedStylesForRange(filePath, styleProps);
+    // Look up computed styles per element
+    const computedByPropKey = await this.getComputedStyles(filePath, groups);
 
     const hints: InlayHint[] = [];
-    for (const prop of styleProps) {
-      const computed = computedByLine.get(prop.line);
-      if (!computed) continue;
+    for (const group of groups) {
+      for (const prop of group.properties) {
+        const computed = computedByPropKey.get(propKey(prop));
+        if (!computed) continue;
 
-      const computedValue = computed[prop.cssName];
-      if (!computedValue) continue;
+        const computedValue = computed[prop.cssName];
+        if (!computedValue) continue;
 
-      // Only show hint when computed value differs from source literal
-      if (normalizeValue(computedValue) === normalizeValue(prop.sourceValue)) continue;
+        // Only show hint when computed value differs from source literal
+        if (normalizeValue(computedValue) === normalizeValue(prop.sourceValue)) continue;
 
-      hints.push({
-        position: { line: prop.line, character: prop.endColumn },
-        label: ` = ${computedValue}`,
-        kind: InlayHintKind.Parameter,
-        paddingLeft: true,
-      });
+        hints.push({
+          position: { line: prop.line, character: prop.endColumn },
+          label: ` = ${computedValue}`,
+          kind: InlayHintKind.Parameter,
+          paddingLeft: true,
+        });
+      }
     }
 
     return hints;
   }
 
   /**
-   * For each style property, find the parent JSX element and get computed styles.
-   * Groups by JSX element line to avoid redundant CDP lookups.
+   * For each element group, look up computed styles via the fiber bridge.
+   * Returns a map from property key (line:col) to computed styles.
    */
-  private async getComputedStylesForRange(
+  private async getComputedStyles(
     filePath: string,
-    styleProps: StyleProperty[],
-  ): Promise<Map<number, ComputedStyles>> {
+    groups: StylePropertyGroup[],
+  ): Promise<Map<string, ComputedStyles>> {
     const client = this.connection.cdpClient;
-    const result = new Map<number, ComputedStyles>();
+    const result = new Map<string, ComputedStyles>();
     if (!client) return result;
 
-    // Deduplicate lookups by the JSX element line
-    const elementLines = new Set<number>();
-    for (const prop of styleProps) {
-      elementLines.add(prop.line);
-    }
-
-    // Get computed styles for each unique element location
-    const seen = new Set<number>();
-    for (const prop of styleProps) {
-      if (seen.has(prop.line)) continue;
-      seen.add(prop.line);
-
+    for (const group of groups) {
       try {
-        // Find the parent JSX element for this style property
-        const comp = this.jsxAnalyzer.getComponentAt(filePath, prop.line, 0);
+        const comp = this.jsxAnalyzer.getComponentAt(
+          filePath,
+          group.elementLine,
+          group.elementColumn,
+        );
         if (!comp) continue;
 
-        const live = await this.sourceMapper.lookupLive(client, filePath, comp.line - 1, comp.column);
-        if (live) {
-          // Map computed styles to all style property lines within this element
-          for (const p of styleProps) {
-            if (p.line >= (comp.line - 1)) {
-              result.set(p.line, live.computedStyles);
-            }
-          }
+        const live = await this.sourceMapper.lookupLive(
+          client, filePath, comp.line - 1, comp.column,
+        );
+        if (!live) continue;
+
+        // Map computed styles only to this element's properties
+        for (const prop of group.properties) {
+          result.set(propKey(prop), live.computedStyles);
         }
       } catch {
         // Skip this element
@@ -112,16 +115,20 @@ export class InlayHintProvider {
   }
 }
 
+function propKey(prop: StyleProperty): string {
+  return `${prop.line}:${prop.endColumn}`;
+}
+
 /**
- * Walk the AST to find all inline style properties in the given line range.
- * Looks for style={{...}} JSX attributes and extracts each property assignment.
+ * Walk the AST to find inline style properties, grouped by JSX element.
+ * Each group tracks the element's position so we can look up its fiber.
  */
-function findStyleProperties(
+function findStylePropertyGroups(
   source: SourceFile,
   startLine: number,
   endLine: number,
-): StyleProperty[] {
-  const results: StyleProperty[] = [];
+): StylePropertyGroup[] {
+  const groups: StylePropertyGroup[] = [];
 
   const allJsx = [
     ...source.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
@@ -145,6 +152,8 @@ function findStyleProperties(
       if (!expr || expr.getKind() !== SyntaxKind.ObjectLiteralExpression) continue;
 
       const objLiteral = expr.asKind(SyntaxKind.ObjectLiteralExpression)!;
+      const properties: StyleProperty[] = [];
+
       for (const prop of objLiteral.getProperties()) {
         if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
         const assignment = prop.asKind(SyntaxKind.PropertyAssignment)!;
@@ -169,21 +178,30 @@ function findStyleProperties(
           continue; // Skip non-literal values — can't meaningfully compare
         }
 
-        // End column is after the initializer
         const endPos = initializer.getEnd();
         const lineAndChar = source.compilerNode.getLineAndCharacterOfPosition(endPos);
 
-        results.push({
+        properties.push({
           cssName,
           sourceValue,
           line: propLine,
           endColumn: lineAndChar.character,
         });
       }
+
+      if (properties.length > 0) {
+        // Use the JSX element's own position for the fiber lookup
+        const elementColumn = jsx.getStart() - jsx.getStartLinePos();
+        groups.push({
+          elementLine: jsxLine,
+          elementColumn,
+          properties,
+        });
+      }
     }
   }
 
-  return results;
+  return groups;
 }
 
 /** Normalize values for comparison (strip whitespace, lowercase). */

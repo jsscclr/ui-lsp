@@ -52,6 +52,21 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the UI Language Server"
+        },
+        "uiLanguageServer.tokensPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a DTCG tokens.json file for design system integration"
+        },
+        "uiLanguageServer.tokens.diagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show diagnostics when inline style values match design tokens"
+        },
+        "uiLanguageServer.tokens.completions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show design token completions in style value positions"
         }
       }
     },

@@ -12,6 +12,11 @@ export function App() {
         <ConflictingDimensions />
       </Card>
 
+      <Card label="Token Diagnostics (set tokensPath to tokens.json)">
+        <TokenMatchColor />
+        <TokenMatchSpacing />
+      </Card>
+
       <Card label="Live Diagnostics (connect to Chrome)">
         <ZeroSizeElement />
         <OverflowExample />
@@ -141,6 +146,26 @@ function ClippedTextExample() {
       }}
     >
       This long sentence is clipped with an ellipsis
+    </div>
+  );
+}
+
+// ── Token diagnostic examples (set uiLanguageServer.tokensPath) ──────
+
+/** color matches tokens.colors.primary → "matches design token 'colors.primary'" */
+function TokenMatchColor() {
+  return (
+    <div style={{ color: 'rgb(26, 115, 232)', padding: '8px' }}>
+      This text uses a hardcoded color that matches a design token
+    </div>
+  );
+}
+
+/** padding matches tokens.spacing.medium → "matches design token 'spacing.medium'" */
+function TokenMatchSpacing() {
+  return (
+    <div style={{ padding: '16px', backgroundColor: 'rgb(236, 240, 241)' }}>
+      This box uses a hardcoded spacing value that matches a design token
     </div>
   );
 }

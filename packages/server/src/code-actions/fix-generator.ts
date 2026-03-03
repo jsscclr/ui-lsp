@@ -3,6 +3,7 @@ import type { DiagnosticData } from '../diagnostics/diagnostic-data.js';
 import {
   addPropertyEdit,
   addOrModifyPropertyEdit,
+  modifyPropertyEdit,
   removePropertyEdit,
 } from './style-edit-utils.js';
 
@@ -106,5 +107,20 @@ const fixHandlers: Record<string, FixHandler> = {
       });
     }
     return fixes;
+  },
+
+  'hardcoded-token-value': (data) => {
+    if (!data.styleAttr) return [];
+    const { propName, matches } = data.fixContext as {
+      propName: string;
+      matches: Array<{ tokenPath: string; tokenCssValue: string }>;
+    };
+    return matches.map((match) => {
+      const edit = modifyPropertyEdit(data.styleAttr!, propName, `'${match.tokenCssValue}'`);
+      return {
+        title: `Use token '${match.tokenPath}'`,
+        edits: edit ? [edit] : [],
+      };
+    }).filter((fix) => fix.edits.length > 0);
   },
 };

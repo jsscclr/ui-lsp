@@ -8,6 +8,9 @@ import {
 } from 'ts-morph';
 import type { JsxAnalyzer } from '../static/jsx-analyzer.js';
 import type { DiagnosticData, StyleAttrData } from './diagnostic-data.js';
+import type { TokenStore } from '../tokens/token-store.js';
+import { CSS_PROPERTY_TO_TOKEN_TYPE } from '../tokens/property-mapping.js';
+import { parseColor, colorToHex } from '../static/color-parser.js';
 
 const FLEX_CHILD_PROPERTIES = new Set([
   'flexDirection', 'flexWrap', 'justifyContent', 'alignItems', 'alignContent', 'gap',
@@ -16,9 +19,14 @@ const FLEX_CHILD_PROPERTIES = new Set([
 
 export class DiagnosticsProvider {
   private jsxAnalyzer: JsxAnalyzer;
+  private tokenStore: TokenStore | null = null;
 
   constructor(jsxAnalyzer: JsxAnalyzer) {
     this.jsxAnalyzer = jsxAnalyzer;
+  }
+
+  setTokenStore(store: TokenStore | null): void {
+    this.tokenStore = store;
   }
 
   validate(uri: string, filePath: string): Diagnostic[] {
@@ -35,6 +43,11 @@ export class DiagnosticsProvider {
         ...checkWidthWithFlex(props, styleAttr),
         ...checkConflictingDimensions(props, styleAttr),
       );
+      if (this.tokenStore) {
+        diagnostics.push(
+          ...checkHardcodedTokenValue(props, styleAttr, this.tokenStore),
+        );
+      }
     }
 
     return diagnostics;
@@ -250,6 +263,71 @@ function checkDimensionPair(
         { ruleId: 'conflicting-dimensions', styleAttr, fixContext: { dimName, minName } },
       ),
     );
+  }
+}
+
+/**
+ * Rule: inline value matches a design token — suggest using the token.
+ */
+function checkHardcodedTokenValue(
+  props: Map<string, StyleProp>,
+  styleAttr: StyleAttrData,
+  tokenStore: TokenStore,
+): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+
+  for (const [name, prop] of props) {
+    const tokenType = CSS_PROPERTY_TO_TOKEN_TYPE[name];
+    if (!tokenType) continue;
+
+    const normalized = normalizeInlineValue(prop.value, tokenType);
+    if (normalized === null) continue;
+
+    const matches = tokenStore.findByValue(normalized);
+    if (matches.length === 0) continue;
+
+    const tokenNames = matches.map((t) => `'${t.path}'`).join(', ');
+    diagnostics.push({
+      range: nodeRange(prop.assignment),
+      message: `'${prop.value}' matches design token ${tokenNames}.`,
+      severity: DiagnosticSeverity.Information,
+      source: 'ui-ls',
+      data: {
+        ruleId: 'hardcoded-token-value',
+        styleAttr,
+        fixContext: {
+          propName: name,
+          matches: matches.map((t) => ({ tokenPath: t.path, tokenCssValue: t.cssValue })),
+        },
+      } satisfies DiagnosticData,
+    });
+  }
+
+  return diagnostics;
+}
+
+/** Normalize an inline style value to the same canonical form as the token store. */
+function normalizeInlineValue(value: string, tokenType: string): string | null {
+  switch (tokenType) {
+    case 'color': {
+      const parsed = parseColor(value);
+      return parsed ? colorToHex(parsed) : null;
+    }
+    case 'dimension': {
+      const trimmed = value.trim().toLowerCase();
+      // Numeric literal in source (e.g. padding: 16) — append px
+      const num = Number(trimmed);
+      if (!Number.isNaN(num) && String(num) === trimmed) return `${num}px`;
+      return trimmed;
+    }
+    case 'fontWeight':
+      return String(value).trim();
+    case 'fontFamily':
+      return value.trim();
+    case 'duration':
+      return value.trim().toLowerCase();
+    default:
+      return null;
   }
 }
 
