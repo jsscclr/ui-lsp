@@ -15,26 +15,28 @@ export function estimateLayout(styles: ComputedStyles): BoxModelData | null {
     node.calculateLayout(undefined, undefined, Direction.LTR);
 
     const layout = node.getComputedLayout();
+    const pl = node.getComputedPadding(Edge.Left);
+    const pr = node.getComputedPadding(Edge.Right);
+    const pt = node.getComputedPadding(Edge.Top);
+    const pb = node.getComputedPadding(Edge.Bottom);
+    const bl = node.getComputedBorder(Edge.Left);
+    const br = node.getComputedBorder(Edge.Right);
+    const bt = node.getComputedBorder(Edge.Top);
+    const bb = node.getComputedBorder(Edge.Bottom);
+
+    // Yoga's layout.width/height are outer dimensions — subtract padding + border for content
+    const contentWidth = Math.max(0, layout.width - pl - pr - bl - br);
+    const contentHeight = Math.max(0, layout.height - pt - pb - bt - bb);
 
     return {
       content: {
         x: layout.left,
         y: layout.top,
-        width: layout.width,
-        height: layout.height,
+        width: contentWidth,
+        height: contentHeight,
       },
-      padding: {
-        top: node.getComputedPadding(Edge.Top),
-        right: node.getComputedPadding(Edge.Right),
-        bottom: node.getComputedPadding(Edge.Bottom),
-        left: node.getComputedPadding(Edge.Left),
-      },
-      border: {
-        top: node.getComputedBorder(Edge.Top),
-        right: node.getComputedBorder(Edge.Right),
-        bottom: node.getComputedBorder(Edge.Bottom),
-        left: node.getComputedBorder(Edge.Left),
-      },
+      padding: { top: pt, right: pr, bottom: pb, left: pl },
+      border: { top: bt, right: br, bottom: bb, left: bl },
       margin: {
         top: node.getComputedMargin(Edge.Top),
         right: node.getComputedMargin(Edge.Right),

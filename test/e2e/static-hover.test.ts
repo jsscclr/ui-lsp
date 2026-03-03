@@ -71,8 +71,9 @@ describe('Layout estimation', () => {
     };
     const box = estimateLayout(styles);
     expect(box).not.toBeNull();
-    expect(box!.content.width).toBe(200);
-    expect(box!.content.height).toBe(100);
+    // Content area = outer dimension minus padding (yoga default is content-box-like)
+    expect(box!.content.width).toBe(160); // 200 - 20 - 20
+    expect(box!.content.height).toBe(60); // 100 - 20 - 20
     expect(box!.padding.top).toBe(20);
     expect(box!.padding.right).toBe(20);
     expect(box!.margin.top).toBe(10);

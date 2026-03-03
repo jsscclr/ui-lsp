@@ -91,6 +91,7 @@ export class JsxAnalyzer {
       if (attr.getKind() === SyntaxKind.JsxAttribute) {
         const jsxAttr = attr.asKind(SyntaxKind.JsxAttribute)!;
         const name = jsxAttr.getNameNode().getText();
+        if (name === 'style') continue; // Styles shown separately in computed styles
         const initializer = jsxAttr.getInitializer();
 
         if (!initializer) {
