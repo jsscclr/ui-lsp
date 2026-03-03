@@ -72,9 +72,17 @@ export class CDPConnection {
       await client.connect(wsUrl);
 
       // Enable required CDP domains
+      await client.send('Page.enable');
       await client.send('DOM.enable');
       await client.send('CSS.enable');
       await client.send('Runtime.enable');
+
+      // Inject a minimal React DevTools hook so React registers fiber roots,
+      // even if the React DevTools extension isn't installed.
+      // This runs before any JS on future page loads.
+      await client.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: buildHookInjectionScript(),
+      });
 
       this.client = client;
       this.reconnectInterval = DEFAULT_RECONNECT_INTERVAL_MS;
@@ -141,4 +149,34 @@ export class CDPConnection {
     }
     return page.webSocketDebuggerUrl;
   }
+}
+
+/**
+ * Minimal __REACT_DEVTOOLS_GLOBAL_HOOK__ that React will register fiber roots with.
+ * Must be injected before React initializes. React checks for this on module load
+ * and calls hook.inject(renderer) + hook.onCommitFiberRoot(id, root) on each commit.
+ */
+function buildHookInjectionScript(): string {
+  return `(function() {
+  if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) return;
+  var roots = new Map();
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    supportsFiber: true,
+    renderers: new Map(),
+    inject: function(renderer) {
+      var id = roots.size + 1;
+      roots.set(id, new Set());
+      this.renderers.set(id, renderer);
+      return id;
+    },
+    onCommitFiberRoot: function(id, root) {
+      var s = roots.get(id);
+      if (s) s.add(root);
+    },
+    onCommitFiberUnmount: function() {},
+    getFiberRoots: function(id) {
+      return roots.get(id) || new Set();
+    }
+  };
+})();`;
 }

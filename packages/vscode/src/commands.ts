@@ -36,5 +36,14 @@ export function registerCommands(
         'Start Chrome with --remote-debugging-port=9222 for live data.',
       );
     }),
+
+    vscode.commands.registerCommand('uiLanguageServer.diagnose', async () => {
+      const result = await client.sendRequest<Record<string, unknown>>('ui-ls/diagnose');
+      const output = vscode.window.createOutputChannel('UI Language Server');
+      output.clear();
+      output.appendLine('=== UI Language Server Diagnostic ===');
+      output.appendLine(JSON.stringify(result, null, 2));
+      output.show();
+    }),
   );
 }

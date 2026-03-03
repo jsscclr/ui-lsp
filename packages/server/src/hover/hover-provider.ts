@@ -77,9 +77,10 @@ export class HoverProvider {
     if (!client) return null;
 
     try {
+      // LSP lines are 0-based; the fiber lookup handles conversion internally
       return await this.sourceMapper.lookupLive(client, filePath, line, col);
-    } catch {
-      // CDP lookup failed — fall through to static
+    } catch (err) {
+      console.error('[ui-ls] Live lookup failed:', err);
       return null;
     }
   }

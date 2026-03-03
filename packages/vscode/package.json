@@ -48,6 +48,10 @@
       {
         "command": "uiLanguageServer.showStatus",
         "title": "UI Language Server: Show Connection Status"
+      },
+      {
+        "command": "uiLanguageServer.diagnose",
+        "title": "UI Language Server: Diagnose Fiber Tree"
       }
     ]
   },

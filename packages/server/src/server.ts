@@ -98,6 +98,41 @@ connection.onRequest('ui-ls/disconnect', () => {
   cdpConnection.disconnect();
 });
 
+connection.onRequest('ui-ls/diagnose', async () => {
+  const client = cdpConnection.cdpClient;
+  if (!client) return { error: 'not connected' };
+  try {
+    const { buildFiberDiagnosticExpression, buildFiberLookupExpression } = await import('./cdp/fiber-bridge.js');
+
+    // Run standard diagnostic
+    const diagResult = await client.send('Runtime.evaluate', {
+      expression: buildFiberDiagnosticExpression(),
+      returnByValue: true,
+      awaitPromise: false,
+    });
+
+    // Test lookup: try to find the div at line 2 (0-based) of App.tsx
+    // This exercises the full async source map resolution path
+    const testExpr = buildFiberLookupExpression('/src/App.tsx', 2, 0);
+    const lookupResult = await client.send('Runtime.evaluate', {
+      expression: testExpr,
+      returnByValue: true,
+      awaitPromise: true,
+    }) as { result: { value?: unknown }; exceptionDetails?: unknown };
+
+    return {
+      diagnostic: diagResult,
+      testLookup: {
+        input: { file: '/src/App.tsx', line: 2 },
+        result: lookupResult.result?.value,
+        exception: lookupResult.exceptionDetails ? String(lookupResult.exceptionDetails) : null,
+      },
+    };
+  } catch (err) {
+    return { error: String(err) };
+  }
+});
+
 connection.onShutdown(() => {
   cdpConnection.disconnect();
 });

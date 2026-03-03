@@ -74,31 +74,22 @@ export class SourceMapper {
   ): Promise<FiberResult | null> {
     const expression = buildFiberLookupExpression(filePath, line, column);
 
-    // We need the result both by-value (props, name) and by-reference (element objectId)
-    const result = (await client.send('Runtime.evaluate', {
-      expression,
-      returnByValue: false,
-      awaitPromise: false,
-    })) as {
-      result: { type: string; objectId?: string; value?: unknown; subtype?: string };
-      exceptionDetails?: unknown;
-    };
-
-    if (result.exceptionDetails) return null;
-
-    // Get the by-value properties
+    // Get by-value result (props, componentName, found)
+    // The expression is async (fetches source maps for React 19), so awaitPromise: true
     const byValueResult = (await client.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
-      awaitPromise: false,
-    })) as { result: { value?: unknown } };
+      awaitPromise: true,
+    })) as { result: { value?: unknown }; exceptionDetails?: unknown };
+
+    if (byValueResult.exceptionDetails) return null;
 
     const parsed = parseFiberLookupResult(byValueResult.result.value);
     if (!parsed.found) return null;
 
-    // Now get the element's objectId via a targeted expression
+    // Get the DOM element's objectId from the global set by the lookup expression
     const elementResult = (await client.send('Runtime.evaluate', {
-      expression: `(${expression})._element`,
+      expression: 'window.__UI_LS_FOUND_ELEMENT__',
       returnByValue: false,
       awaitPromise: false,
     })) as { result: { objectId?: string; type: string; subtype?: string } };
