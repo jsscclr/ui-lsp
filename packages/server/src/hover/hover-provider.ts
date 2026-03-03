@@ -73,8 +73,12 @@ export class HoverProvider {
     if (!client) return null;
 
     try {
+      // Use the JSX element name to disambiguate when multiple fibers match the same line
+      const componentInfo = this.jsxAnalyzer.getComponentAt(filePath, line, col);
+      const expectedName = componentInfo?.name;
+
       // LSP lines are 0-based; the fiber lookup handles conversion internally
-      return await this.sourceMapper.lookupLive(client, filePath, line, col);
+      return await this.sourceMapper.lookupLive(client, filePath, line, col, expectedName);
     } catch (err) {
       console.error('[ui-ls] Live lookup failed:', err);
       return null;
