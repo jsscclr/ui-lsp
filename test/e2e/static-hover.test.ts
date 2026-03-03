@@ -117,13 +117,12 @@ describe('Hover content formatting', () => {
     const content = formatHoverContent(data);
 
     expect(content).toContain('**StyledBox** (estimated)');
-    expect(content).toContain('200 × 100');
-    expect(content).toContain('margin');
-    expect(content).toContain('padding');
-    expect(content).toContain('border');
-    expect(content).toContain('`width`');
-    expect(content).toContain('`200px`');
-    expect(content).toContain('`background-color`');
+    expect(content).toContain('`200 × 100`');
+    expect(content).toContain('padding: `20`');
+    expect(content).toContain('border: `2`');
+    expect(content).toContain('margin: `10`');
+    expect(content).toContain('`display: block`');
+    expect(content).toContain('`background-color: #ecf0f1`');
   });
 
   it('formats live hover data', () => {
@@ -147,6 +146,6 @@ describe('Hover content formatting', () => {
 
     expect(content).toContain('**Header** (live)');
     expect(content).toContain('400 × 32');
-    expect(content).toContain('title: "Hello"');
+    expect(content).not.toContain('Props');
   });
 });

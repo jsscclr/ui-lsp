@@ -1,121 +1,99 @@
-import { HOVER_CSS_PROPERTIES, type BoxModelData, type ComputedStyles, type HoverData } from '@ui-ls/shared';
+import type { BoxModelData, ComputedStyles, HoverData } from '@ui-ls/shared';
+
+/** Style property groups displayed in the hover tooltip. */
+const STYLE_GROUPS: { label: string; props: string[] }[] = [
+  {
+    label: 'Layout',
+    props: [
+      'display', 'position', 'box-sizing',
+      'flex-direction', 'justify-content', 'align-items', 'gap',
+      'grid-template-columns', 'grid-template-rows',
+      'overflow', 'z-index',
+    ],
+  },
+  {
+    label: 'Typography',
+    props: ['font-size', 'font-weight', 'line-height', 'color'],
+  },
+  {
+    label: 'Visual',
+    props: ['background-color', 'border', 'opacity'],
+  },
+];
+
+const SKIP_VALUES = new Set(['initial', 'none', 'normal', 'auto', '0', '0px']);
 
 /**
- * Formats HoverData into Markdown MarkupContent for the LSP hover response.
- * Includes ASCII box model, computed styles table, and component props.
+ * Formats HoverData into compact Markdown for the LSP hover response.
  */
 export function formatHoverContent(data: HoverData): string {
   const parts: string[] = [];
   const tag = data.source === 'live' ? '(live)' : '(estimated)';
 
-  // Header
-  parts.push(`**${data.componentInfo.name}** ${tag}\n`);
+  parts.push(`**${data.componentInfo.name}** ${tag}`);
 
-  // Live screenshot preview
+  // Screenshot (downscaled server-side to fit the tooltip)
   if (data.source === 'live' && data.screenshot) {
     parts.push(`![${data.componentInfo.name}](data:image/png;base64,${data.screenshot})`);
   }
 
-  // Box model diagram
+  // Compact box model: `773 × 231` · padding: `16` · border: `0.7` · margin: `0`
   if (data.boxModel) {
-    parts.push(renderBoxModel(data.boxModel));
+    parts.push(renderCompactBoxModel(data.boxModel));
   }
 
-  // Computed styles table
-  const styleEntries = filterStyles(data.computedStyles);
-  if (styleEntries.length > 0) {
-    parts.push(renderStylesTable(styleEntries));
+  // Grouped styles
+  const groupLines = renderStyleGroups(data.computedStyles);
+  if (groupLines.length > 0) {
+    parts.push(groupLines.join('\n\n'));
   }
 
-  // Props
-  const propEntries = Object.entries(data.componentInfo.props);
-  if (propEntries.length > 0) {
-    parts.push(renderProps(propEntries));
-  }
-
-  return parts.join('\n---\n');
+  return parts.join('\n\n');
 }
 
-function renderBoxModel(box: BoxModelData): string {
-  const m = box.margin;
-  const b = box.border;
-  const p = box.padding;
-  const c = box.content;
+function renderCompactBoxModel(box: BoxModelData): string {
+  const size = `\`${fmt(box.content.width)} × ${fmt(box.content.height)}\``;
+  const segments: string[] = [size];
 
-  const contentW = fmt(c.width);
-  const contentH = fmt(c.height);
-  const contentLabel = `${contentW} × ${contentH}`;
+  const padding = summarizeEdges(box.padding);
+  if (padding !== null) segments.push(`padding: \`${padding}\``);
 
-  // Build the ASCII box model diagram
-  // Each nested box is represented with its edge values
+  const border = summarizeEdges(box.border);
+  if (border !== null) segments.push(`border: \`${border}\``);
+
+  const margin = summarizeEdges(box.margin);
+  if (margin !== null) segments.push(`margin: \`${margin}\``);
+
+  return segments.join(' · ');
+}
+
+/** Summarize edge values: uniform → single value, mixed → `top right bottom left`. Null if all zero. */
+function summarizeEdges(edges: { top: number; right: number; bottom: number; left: number }): string | null {
+  const { top, right, bottom, left } = edges;
+  if (top === 0 && right === 0 && bottom === 0 && left === 0) return null;
+  if (top === right && right === bottom && bottom === left) return fmt(top);
+  if (top === bottom && left === right) return `${fmt(top)} ${fmt(left)}`;
+  return `${fmt(top)} ${fmt(right)} ${fmt(bottom)} ${fmt(left)}`;
+}
+
+function renderStyleGroups(styles: ComputedStyles): string[] {
   const lines: string[] = [];
-  lines.push('```');
-  lines.push(`┌ margin ──────────────────────────┐`);
-  lines.push(`│ ${pad(fmt(m.top), 34)}│`);
-  lines.push(`│${pad(fmt(m.left), 3)}┌ border ─────────────────────┐${pad(fmt(m.right), 3)}│`);
-  lines.push(`│   │ ${pad(fmt(b.top), 29)}│   │`);
-  lines.push(`│   │${pad(fmt(b.left), 2)}┌ padding ──────────────┐${pad(fmt(b.right), 2)}│   │`);
-  lines.push(`│   │  │ ${pad(fmt(p.top), 22)}│  │   │`);
-  lines.push(`│   │  │${pad(fmt(p.left), 2)}┌──────────────┐${pad(fmt(p.right), 2)}│  │   │`);
-  lines.push(`│   │  │  │${pad(contentLabel, 14)}│  │  │   │`);
-  lines.push(`│   │  │${pad(fmt(p.left), 2)}└──────────────┘${pad(fmt(p.right), 2)}│  │   │`);
-  lines.push(`│   │  │ ${pad(fmt(p.bottom), 22)}│  │   │`);
-  lines.push(`│   │${pad(fmt(b.left), 2)}└──────────────────────┘${pad(fmt(b.right), 2)}│   │`);
-  lines.push(`│   │ ${pad(fmt(b.bottom), 29)}│   │`);
-  lines.push(`│${pad(fmt(m.left), 3)}└─────────────────────────────┘${pad(fmt(m.right), 3)}│`);
-  lines.push(`│ ${pad(fmt(m.bottom), 34)}│`);
-  lines.push(`└───────────────────────────────────┘`);
-  lines.push('```');
-
-  return lines.join('\n');
-}
-
-function renderStylesTable(entries: [string, string][]): string {
-  const lines: string[] = [];
-  lines.push('**Computed Styles**\n');
-  lines.push('| Property | Value |');
-  lines.push('|----------|-------|');
-  for (const [prop, value] of entries) {
-    lines.push(`| \`${prop}\` | \`${value}\` |`);
-  }
-  return lines.join('\n');
-}
-
-function renderProps(entries: [string, unknown][]): string {
-  const lines: string[] = [];
-  lines.push('**Props**\n');
-  lines.push('```');
-  for (const [key, value] of entries) {
-    const display = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
-    lines.push(`${key}: ${display}`);
-  }
-  lines.push('```');
-  return lines.join('\n');
-}
-
-/** Filter computed styles to the configured subset for display. */
-function filterStyles(styles: ComputedStyles): [string, string][] {
-  const result: [string, string][] = [];
-  for (const prop of HOVER_CSS_PROPERTIES) {
-    const value = styles[prop];
-    if (value && value !== 'initial' && value !== 'none' && value !== 'normal' && value !== 'auto') {
-      result.push([prop, value]);
+  for (const group of STYLE_GROUPS) {
+    const values: string[] = [];
+    for (const prop of group.props) {
+      const val = styles[prop];
+      if (val && !SKIP_VALUES.has(val)) {
+        values.push(`\`${prop}: ${val}\``);
+      }
+    }
+    if (values.length > 0) {
+      lines.push(`**${group.label}** — ${values.join(' · ')}`);
     }
   }
-  return result;
+  return lines;
 }
 
-/** Format a number for the box model diagram. */
 function fmt(n: number): string {
   if (n === 0) return '0';
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
-}
-
-/** Center-pad a string to a target width. */
-function pad(str: string, width: number): string {
-  if (str.length >= width) return str;
-  const total = width - str.length;
-  const left = Math.floor(total / 2);
-  const right = total - left;
-  return ' '.repeat(left) + str + ' '.repeat(right);
 }

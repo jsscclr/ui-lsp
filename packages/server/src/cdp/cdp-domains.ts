@@ -1,4 +1,5 @@
 import type { CDPBoxModel, CDPComputedStyleProperty, CDPRemoteObject, BoxModelData, ComputedStyles } from '@ui-ls/shared';
+import { HOVER_SCREENSHOT_MAX_WIDTH } from '@ui-ls/shared';
 import type { CDPClient } from './cdp-client.js';
 import { buildHtmlSnapshotExpression } from './html-snapshot.js';
 
@@ -143,7 +144,7 @@ export async function captureElementScreenshot(
     // Screenshot is at device pixel ratio; box model coords are page-space CSS pixels.
     // Subtract scroll offset to convert page coords → viewport-relative coords.
     const cropResult = (await client.send('Runtime.evaluate', {
-      expression: buildCropExpression(screenshot.data, x, y, width, height),
+      expression: buildCropExpression(screenshot.data, x, y, width, height, HOVER_SCREENSHOT_MAX_WIDTH),
       returnByValue: true,
       awaitPromise: true,
     })) as { result: { value?: string | null }; exceptionDetails?: unknown };
@@ -164,6 +165,7 @@ function buildCropExpression(
   y: number,
   w: number,
   h: number,
+  maxWidth: number,
 ): string {
   return `(async function() {
   var img = new Image();
@@ -184,6 +186,17 @@ function buildCropExpression(
   canvas.width = cw;
   canvas.height = ch;
   canvas.getContext('2d').drawImage(img, cx, cy, cw, ch, 0, 0, cw, ch);
+  var maxW = ${maxWidth};
+  if (cw > maxW) {
+    var scale = maxW / cw;
+    var sw = Math.round(cw * scale);
+    var sh = Math.round(ch * scale);
+    var small = document.createElement('canvas');
+    small.width = sw;
+    small.height = sh;
+    small.getContext('2d').drawImage(canvas, 0, 0, cw, ch, 0, 0, sw, sh);
+    return small.toDataURL('image/png').split(',')[1];
+  }
   return canvas.toDataURL('image/png').split(',')[1];
 })()`;
 }

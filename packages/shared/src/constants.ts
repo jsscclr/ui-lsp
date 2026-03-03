@@ -3,6 +3,9 @@ export const DEFAULT_RECONNECT_INTERVAL_MS = 1000;
 export const MAX_RECONNECT_INTERVAL_MS = 30_000;
 export const RECONNECT_BACKOFF_MULTIPLIER = 2;
 
+/** Max width (CSS pixels) for the screenshot rendered in the hover tooltip. */
+export const HOVER_SCREENSHOT_MAX_WIDTH = 300;
+
 /** CSS properties shown in the hover display by default. */
 export const HOVER_CSS_PROPERTIES = [
   'display',
