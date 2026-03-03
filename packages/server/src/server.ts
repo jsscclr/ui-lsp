@@ -29,6 +29,7 @@ import { LiveDiagnosticsProvider } from './diagnostics/live-diagnostics-provider
 import { CompletionProvider } from './completions/completion-provider.js';
 import { TokenLoader } from './tokens/token-loader.js';
 import { computeStyleEdit } from './inspector/style-edit-handler.js';
+import { VisualAnalyzer } from './ai/visual-analyzer.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
@@ -53,6 +54,7 @@ let tokenLoader: TokenLoader | null = null;
 const liveDiagnosticsCache = new Map<string, Diagnostic[]>();
 const liveValidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const LIVE_VALIDATE_DEBOUNCE = 2_000;
+const aiDiagnosticsCache = new Map<string, Diagnostic[]>();
 
 function createProviders(cdp: CDPConnection): void {
   sourceMapper = new SourceMapper();
@@ -80,6 +82,29 @@ function createProviders(cdp: CDPConnection): void {
     liveDiagnosticsCache.set(event.uri, liveDiags);
     publishMergedDiagnostics(event.uri);
   };
+
+  // AI visual analysis → publish as diagnostics
+  inspectorProvider.onAiAnalysis = (uri, data) => {
+    if (!data.visualAnalysis) return;
+    const diags: Diagnostic[] = [];
+    for (const suggestion of data.visualAnalysis.suggestions) {
+      if (!suggestion.property) continue;
+      const inlineInfo = data.inlineStyles.find(
+        (s) => s.camelName === suggestion.property,
+      );
+      if (!inlineInfo) continue;
+      diags.push({
+        range: inlineInfo.range,
+        message: suggestion.message,
+        severity: suggestion.severity === 'warning'
+          ? 2 /* DiagnosticSeverity.Warning */
+          : 3 /* DiagnosticSeverity.Information */,
+        source: 'ui-ls-ai',
+      });
+    }
+    aiDiagnosticsCache.set(uri, diags);
+    publishMergedDiagnostics(uri);
+  };
 }
 
 connection.onInitialize((params): InitializeResult => {
@@ -103,6 +128,13 @@ connection.onInitialize((params): InitializeResult => {
 
   cdpConnection = new CDPConnection(port);
   createProviders(cdpConnection);
+
+  // Initialize AI visual analyzer if API key is available
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    const visualAnalyzer = new VisualAnalyzer(anthropicKey);
+    inspectorProvider.setVisualAnalyzer(visualAnalyzer);
+  }
 
   // Forward connection state changes as custom notifications
   cdpConnection.onStateChange((state, error) => {
@@ -174,7 +206,8 @@ function publishMergedDiagnostics(uri: string): void {
   const filePath = uriToPath(uri);
   const staticDiags = diagnosticsProvider.validate(uri, filePath);
   const liveDiags = liveDiagnosticsCache.get(uri) ?? [];
-  connection.sendDiagnostics({ uri, diagnostics: [...staticDiags, ...liveDiags] });
+  const aiDiags = aiDiagnosticsCache.get(uri) ?? [];
+  connection.sendDiagnostics({ uri, diagnostics: [...staticDiags, ...liveDiags, ...aiDiags] });
 }
 
 function scheduleLiveValidation(uri: string): void {
