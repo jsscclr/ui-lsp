@@ -7,13 +7,27 @@ import {
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ConnectionStatusMethod, DEFAULT_CHROME_DEBUG_PORT } from '@ui-ls/shared';
 import { CDPConnection } from './cdp/cdp-connection.js';
+import { JsxAnalyzer } from './static/jsx-analyzer.js';
 import { HoverProvider } from './hover/hover-provider.js';
+import { CodeLensProvider } from './codelens/codelens-provider.js';
+import { InlayHintProvider } from './inlay-hints/inlay-hint-provider.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
 
+// Shared analyzer instance — all providers read from the same in-memory AST
+const jsxAnalyzer = new JsxAnalyzer();
+
 let cdpConnection: CDPConnection;
 let hoverProvider: HoverProvider;
+let codeLensProvider: CodeLensProvider;
+let inlayHintProvider: InlayHintProvider;
+
+function createProviders(cdp: CDPConnection): void {
+  hoverProvider = new HoverProvider(jsxAnalyzer, cdp);
+  codeLensProvider = new CodeLensProvider(jsxAnalyzer, cdp);
+  inlayHintProvider = new InlayHintProvider(jsxAnalyzer, cdp);
+}
 
 connection.onInitialize((params): InitializeResult => {
   const settings = params.initializationOptions as {
@@ -25,7 +39,7 @@ connection.onInitialize((params): InitializeResult => {
   const autoConnect = settings?.autoConnect ?? true;
 
   cdpConnection = new CDPConnection(port);
-  hoverProvider = new HoverProvider(cdpConnection);
+  createProviders(cdpConnection);
 
   // Forward connection state changes as custom notifications
   cdpConnection.onStateChange((state, error) => {
@@ -43,9 +57,23 @@ connection.onInitialize((params): InitializeResult => {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Full,
       hoverProvider: true,
+      codeLensProvider: { resolveProvider: true },
+      inlayHintProvider: {},
     },
   };
 });
+
+function uriToPath(uri: string): string {
+  if (uri.startsWith('file://')) {
+    return decodeURIComponent(uri.slice(7));
+  }
+  return uri;
+}
+
+function updateDocument(uri: string, content: string): void {
+  jsxAnalyzer.updateFile(uriToPath(uri), content);
+  hoverProvider.invalidate(uriToPath(uri));
+}
 
 connection.onDidOpenTextDocument((params) => {
   const doc = TextDocument.create(
@@ -55,7 +83,7 @@ connection.onDidOpenTextDocument((params) => {
     params.textDocument.text,
   );
   documents.set(params.textDocument.uri, doc);
-  hoverProvider.updateDocument(params.textDocument.uri, params.textDocument.text);
+  updateDocument(params.textDocument.uri, params.textDocument.text);
 });
 
 connection.onDidChangeTextDocument((params) => {
@@ -69,17 +97,29 @@ connection.onDidChangeTextDocument((params) => {
       params.contentChanges[0].text,
     );
     documents.set(params.textDocument.uri, doc);
-    hoverProvider.updateDocument(params.textDocument.uri, params.contentChanges[0].text);
+    updateDocument(params.textDocument.uri, params.contentChanges[0].text);
   }
 });
 
 connection.onDidCloseTextDocument((params) => {
   documents.delete(params.textDocument.uri);
-  hoverProvider.removeDocument(params.textDocument.uri);
+  jsxAnalyzer.removeFile(uriToPath(params.textDocument.uri));
 });
 
 connection.onHover((params) => {
   return hoverProvider.onHover(params, (uri) => documents.get(uri));
+});
+
+connection.onCodeLens((params) => {
+  return codeLensProvider.onCodeLens(params);
+});
+
+connection.onCodeLensResolve((lens) => {
+  return codeLensProvider.onCodeLensResolve(lens);
+});
+
+connection.languages.inlayHint.on((params) => {
+  return inlayHintProvider.onInlayHint(params);
 });
 
 // Custom requests for connect/disconnect commands
@@ -87,7 +127,7 @@ connection.onRequest('ui-ls/connect', async (params: { port?: number }) => {
   const port = params?.port ?? DEFAULT_CHROME_DEBUG_PORT;
   cdpConnection.disconnect();
   cdpConnection = new CDPConnection(port);
-  hoverProvider = new HoverProvider(cdpConnection);
+  createProviders(cdpConnection);
   cdpConnection.onStateChange((state, error) => {
     connection.sendNotification(ConnectionStatusMethod, { state, port, error });
   });

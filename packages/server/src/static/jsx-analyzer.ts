@@ -83,7 +83,7 @@ export class JsxAnalyzer {
 
     const tagName = best.getTagNameNode().getText();
     const startLine = best.getStartLineNumber();
-    const startCol = best.getStartLinePos();
+    const startCol = best.getStart() - best.getStartLinePos();
 
     // Extract props from attributes
     const props: Record<string, unknown> = {};
@@ -113,5 +113,52 @@ export class JsxAnalyzer {
       column: startCol,
       props,
     };
+  }
+
+  /**
+   * Return all JSX elements in a file with their ComponentInfo.
+   * Used by CodeLens to place lenses above each component.
+   */
+  getAllComponents(filePath: string): ComponentInfo[] {
+    const source = this.files.get(filePath);
+    if (!source) return [];
+
+    const jsxOpening = source.getDescendantsOfKind(SyntaxKind.JsxOpeningElement);
+    const jsxSelfClosing = source.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement);
+    const allJsx: JsxElement[] = [...jsxOpening, ...jsxSelfClosing];
+
+    const results: ComponentInfo[] = [];
+    for (const jsx of allJsx) {
+      const tagName = jsx.getTagNameNode().getText();
+      const startLine = jsx.getStartLineNumber();
+      const startCol = jsx.getStart() - jsx.getStartLinePos();
+
+      const props: Record<string, unknown> = {};
+      for (const attr of jsx.getAttributes()) {
+        if (attr.getKind() === SyntaxKind.JsxAttribute) {
+          const jsxAttr = attr.asKind(SyntaxKind.JsxAttribute)!;
+          const name = jsxAttr.getNameNode().getText();
+          if (name === 'style') continue;
+          const initializer = jsxAttr.getInitializer();
+          if (!initializer) {
+            props[name] = true;
+          } else if (initializer.getKind() === SyntaxKind.StringLiteral) {
+            props[name] = initializer.asKind(SyntaxKind.StringLiteral)!.getLiteralValue();
+          } else {
+            props[name] = initializer.getText();
+          }
+        }
+      }
+
+      results.push({
+        name: tagName,
+        filePath,
+        line: startLine,
+        column: startCol,
+        props,
+      });
+    }
+
+    return results;
   }
 }

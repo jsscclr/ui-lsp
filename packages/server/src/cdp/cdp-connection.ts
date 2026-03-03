@@ -84,6 +84,10 @@ export class CDPConnection {
         source: buildHookInjectionScript(),
       });
 
+      // Reload so the hook is present before React initializes.
+      // Without this, the page that was already loaded won't have the hook.
+      await client.send('Page.reload');
+
       this.client = client;
       this.reconnectInterval = DEFAULT_RECONNECT_INTERVAL_MS;
       this.setState('connected');

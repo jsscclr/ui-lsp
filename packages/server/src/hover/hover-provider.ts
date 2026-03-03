@@ -16,23 +16,18 @@ import { HoverCache } from './hover-cache.js';
  */
 export class HoverProvider {
   private sourceMapper = new SourceMapper();
-  private jsxAnalyzer = new JsxAnalyzer();
+  private jsxAnalyzer: JsxAnalyzer;
   private hoverCache = new HoverCache();
   private connection: CDPConnection;
 
-  constructor(connection: CDPConnection) {
+  constructor(jsxAnalyzer: JsxAnalyzer, connection: CDPConnection) {
+    this.jsxAnalyzer = jsxAnalyzer;
     this.connection = connection;
   }
 
-  updateDocument(uri: string, content: string): void {
-    const filePath = uriToPath(uri);
-    this.jsxAnalyzer.updateFile(filePath, content);
+  invalidate(filePath: string): void {
     this.hoverCache.invalidate();
     this.invalidateBrowserSourceMapCache(filePath);
-  }
-
-  removeDocument(uri: string): void {
-    this.jsxAnalyzer.removeFile(uriToPath(uri));
   }
 
   async onHover(
