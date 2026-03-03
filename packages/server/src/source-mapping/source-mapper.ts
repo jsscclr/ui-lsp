@@ -1,6 +1,6 @@
 import type { BoxModelData, ComputedStyles, ComponentInfo, LiveHoverData } from '@ui-ls/shared';
 import type { CDPClient } from '../cdp/cdp-client.js';
-import { getRawBoxModel, getBoxModel, getComputedStyle, requestNodeForObject, getDocument, captureElementScreenshot, parseBoxModel } from '../cdp/cdp-domains.js';
+import { getRawBoxModel, getBoxModel, getComputedStyle, requestNodeForObject, getDocument, captureElementScreenshot, captureElementHtml, parseBoxModel } from '../cdp/cdp-domains.js';
 import { buildFiberLookupExpression, parseFiberLookupResult } from '../cdp/fiber-bridge.js';
 import { FiberCache } from './fiber-cache.js';
 
@@ -49,9 +49,12 @@ export class SourceMapper {
       getComputedStyle(client, nodeId),
     ]);
 
-    // Parse box model (sync) and capture screenshot (async) from the same raw data
+    // Parse box model (sync) and capture screenshot + HTML snapshot (async) in parallel
     const boxModel = parseBoxModel(rawModel);
-    const screenshot = await captureElementScreenshot(client, rawModel);
+    const [screenshot, renderedHtml] = await Promise.all([
+      captureElementScreenshot(client, rawModel),
+      captureElementHtml(client, fiber.objectId),
+    ]);
 
     const componentInfo: ComponentInfo = {
       name: fiber.componentName,
@@ -67,6 +70,7 @@ export class SourceMapper {
       boxModel,
       computedStyles,
       ...(screenshot ? { screenshot } : {}),
+      ...(renderedHtml ? { renderedHtml } : {}),
     };
   }
 

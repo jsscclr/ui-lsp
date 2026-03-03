@@ -5,6 +5,8 @@ export function App() {
       <Card label="Box Model Example">
         <StyledBox />
       </Card>
+
+      <button>hello</button>
     </div>
   );
 }

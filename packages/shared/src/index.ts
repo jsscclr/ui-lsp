@@ -19,9 +19,15 @@ export type {
   ConnectionStatusNotification,
   FiberLookupRequest,
   FiberLookupResponse,
+  CursorPositionParams,
+  InspectorData,
 } from './protocol.js';
 
-export { ConnectionStatusMethod } from './protocol.js';
+export {
+  ConnectionStatusMethod,
+  CursorPositionMethod,
+  InspectorDataMethod,
+} from './protocol.js';
 
 export {
   DEFAULT_CHROME_DEBUG_PORT,

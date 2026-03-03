@@ -12,10 +12,29 @@
   "categories": ["Programming Languages"],
   "activationEvents": [
     "onLanguage:typescriptreact",
-    "onLanguage:javascriptreact"
+    "onLanguage:javascriptreact",
+    "onView:uiLanguageServer.inspectorView"
   ],
   "main": "./dist/extension.cjs",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ui-language-server",
+          "title": "UI Inspector",
+          "icon": "$(inspect)"
+        }
+      ]
+    },
+    "views": {
+      "ui-language-server": [
+        {
+          "type": "webview",
+          "id": "uiLanguageServer.inspectorView",
+          "name": "Component Inspector"
+        }
+      ]
+    },
     "configuration": {
       "title": "UI Language Server",
       "properties": {

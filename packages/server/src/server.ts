@@ -5,14 +5,22 @@ import {
   type InitializeResult,
 } from 'vscode-languageserver/node.js';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ConnectionStatusMethod, DEFAULT_CHROME_DEBUG_PORT } from '@ui-ls/shared';
+import {
+  ConnectionStatusMethod,
+  CursorPositionMethod,
+  InspectorDataMethod,
+  DEFAULT_CHROME_DEBUG_PORT,
+} from '@ui-ls/shared';
+import type { CursorPositionParams } from '@ui-ls/shared';
 import { CDPConnection } from './cdp/cdp-connection.js';
+import { SourceMapper } from './source-mapping/source-mapper.js';
 import { JsxAnalyzer } from './static/jsx-analyzer.js';
 import { HoverProvider } from './hover/hover-provider.js';
 import { CodeLensProvider } from './codelens/codelens-provider.js';
 import { InlayHintProvider } from './inlay-hints/inlay-hint-provider.js';
 import { ColorProvider } from './color/color-provider.js';
 import { DiagnosticsProvider } from './diagnostics/diagnostics-provider.js';
+import { InspectorProvider } from './inspector/inspector-provider.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
@@ -21,16 +29,25 @@ const documents = new Map<string, TextDocument>();
 const jsxAnalyzer = new JsxAnalyzer();
 
 let cdpConnection: CDPConnection;
+let sourceMapper: SourceMapper;
 let hoverProvider: HoverProvider;
 let codeLensProvider: CodeLensProvider;
 let inlayHintProvider: InlayHintProvider;
+let inspectorProvider: InspectorProvider;
 const colorProvider = new ColorProvider(jsxAnalyzer);
 const diagnosticsProvider = new DiagnosticsProvider(jsxAnalyzer);
 
 function createProviders(cdp: CDPConnection): void {
-  hoverProvider = new HoverProvider(jsxAnalyzer, cdp);
+  sourceMapper = new SourceMapper();
+  hoverProvider = new HoverProvider(jsxAnalyzer, cdp, sourceMapper);
   codeLensProvider = new CodeLensProvider(jsxAnalyzer, cdp);
   inlayHintProvider = new InlayHintProvider(jsxAnalyzer, cdp);
+  inspectorProvider = new InspectorProvider(
+    jsxAnalyzer,
+    sourceMapper,
+    () => cdpConnection,
+    (data) => connection.sendNotification(InspectorDataMethod, data),
+  );
 }
 
 connection.onInitialize((params): InitializeResult => {
@@ -139,6 +156,11 @@ connection.onDocumentColor((params) => {
 
 connection.onColorPresentation((params) => {
   return colorProvider.onColorPresentation(params);
+});
+
+// Custom notification: cursor position from the extension
+connection.onNotification(CursorPositionMethod, (params: CursorPositionParams) => {
+  inspectorProvider.onCursorPosition(params);
 });
 
 // Custom requests for connect/disconnect commands

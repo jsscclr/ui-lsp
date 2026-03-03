@@ -1,5 +1,6 @@
 import type { CDPBoxModel, CDPComputedStyleProperty, CDPRemoteObject, BoxModelData, ComputedStyles } from '@ui-ls/shared';
 import type { CDPClient } from './cdp-client.js';
+import { buildHtmlSnapshotExpression } from './html-snapshot.js';
 
 /** Convert CDP's flat 8-element quad arrays into structured box model data. */
 export function parseBoxModel(raw: CDPBoxModel): BoxModelData {
@@ -185,4 +186,30 @@ function buildCropExpression(
   canvas.getContext('2d').drawImage(img, cx, cy, cw, ch, 0, 0, cw, ch);
   return canvas.toDataURL('image/png').split(',')[1];
 })()`;
+}
+
+/**
+ * Capture self-contained HTML of a DOM element with all computed styles inlined.
+ * Uses Runtime.callFunctionOn so `this` is bound to the element via its objectId.
+ * Returns null on any failure (same pattern as captureElementScreenshot).
+ */
+export async function captureElementHtml(
+  client: CDPClient,
+  objectId: string,
+): Promise<string | null> {
+  try {
+    const result = (await client.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: buildHtmlSnapshotExpression(),
+      returnByValue: true,
+      awaitPromise: false,
+    })) as { result: { value?: string }; exceptionDetails?: unknown };
+
+    if (result.exceptionDetails || !result.result.value) {
+      return null;
+    }
+    return result.result.value;
+  } catch {
+    return null;
+  }
 }

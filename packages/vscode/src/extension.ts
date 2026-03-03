@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { LanguageClient, TransportKind, type ServerOptions, type LanguageClientOptions } from 'vscode-languageclient/node.js';
-import { ConnectionStatusMethod } from '@ui-ls/shared';
+import { ConnectionStatusMethod, InspectorDataMethod } from '@ui-ls/shared';
+import type { InspectorData } from '@ui-ls/shared';
 import { StatusBar } from './status-bar.js';
 import { registerCommands } from './commands.js';
+import { CursorTracker } from './cursor-tracker.js';
+import { InspectorViewProvider } from './inspector-view.js';
 
 let client: LanguageClient;
 let statusBar: StatusBar;
@@ -45,6 +48,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   client.onNotification(ConnectionStatusMethod, (params: { state: string }) => {
     statusBar.updateState(params.state as 'disconnected' | 'connecting' | 'connected' | 'reconnecting');
   });
+
+  // Component Inspector webview
+  const inspectorProvider = new InspectorViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(InspectorViewProvider.viewType, inspectorProvider),
+  );
+
+  // Relay inspector data from server to webview
+  client.onNotification(InspectorDataMethod, (data: InspectorData | null) => {
+    inspectorProvider.updateData(data);
+  });
+
+  // Track cursor position for the inspector
+  const cursorTracker = new CursorTracker(client);
+  context.subscriptions.push(cursorTracker);
 
   registerCommands(context, client);
 

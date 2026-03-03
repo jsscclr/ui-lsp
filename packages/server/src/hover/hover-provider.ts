@@ -15,14 +15,15 @@ import { HoverCache } from './hover-cache.js';
  * Tries CDP live data first, falls back to static analysis.
  */
 export class HoverProvider {
-  private sourceMapper = new SourceMapper();
   private jsxAnalyzer: JsxAnalyzer;
   private hoverCache = new HoverCache();
   private connection: CDPConnection;
+  private sourceMapper: SourceMapper;
 
-  constructor(jsxAnalyzer: JsxAnalyzer, connection: CDPConnection) {
+  constructor(jsxAnalyzer: JsxAnalyzer, connection: CDPConnection, sourceMapper: SourceMapper) {
     this.jsxAnalyzer = jsxAnalyzer;
     this.connection = connection;
+    this.sourceMapper = sourceMapper;
   }
 
   invalidate(filePath: string): void {
