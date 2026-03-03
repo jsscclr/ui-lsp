@@ -149,6 +149,14 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
         <h3>Computed Styles</h3>
         <table id="styles-table"></table>
       </div>
+      <div id="ai-section" hidden>
+        <h3>AI Analysis <span id="ai-cached-badge" hidden>(cached)</span></h3>
+        <div id="ai-loading" hidden>Analyzing...</div>
+        <div id="ai-content" hidden>
+          <p id="ai-description"></p>
+          <div id="ai-suggestions"></div>
+        </div>
+      </div>
       <div id="props-section" hidden>
         <h3>Props</h3>
         <pre id="props"></pre>
