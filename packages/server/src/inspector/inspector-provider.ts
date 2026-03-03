@@ -1,6 +1,7 @@
 import { SyntaxKind } from 'ts-morph';
-import type { CursorPositionParams, InspectorData, InlineStyleInfo, ComputedStyles, BoxModelData } from '@ui-ls/shared';
+import type { CursorPositionParams, InspectorData, InlineStyleInfo, ComputedStyles, BoxModelData, VisualAnalysis } from '@ui-ls/shared';
 import type { CDPConnection } from '../cdp/cdp-connection.js';
+import type { VisualAnalyzer } from '../ai/visual-analyzer.js';
 import { SourceMapper } from '../source-mapping/source-mapper.js';
 import { JsxAnalyzer } from '../static/jsx-analyzer.js';
 import { extractInlineStyles } from '../static/style-extractor.js';
@@ -27,9 +28,13 @@ export class InspectorProvider {
   private generation = 0;
   private lastKey = '';
   private tokenStore: TokenStore | null = null;
+  private visualAnalyzer: VisualAnalyzer | null = null;
 
   /** Optional callback fired when live data arrives for the cursor element. */
   onLiveData: ((event: LiveDataEvent) => void) | null = null;
+
+  /** Optional callback fired when AI analysis completes. */
+  onAiAnalysis: ((uri: string, data: InspectorData) => void) | null = null;
 
   constructor(
     private jsxAnalyzer: JsxAnalyzer,
@@ -40,6 +45,10 @@ export class InspectorProvider {
 
   setTokenStore(store: TokenStore | null): void {
     this.tokenStore = store;
+  }
+
+  setVisualAnalyzer(analyzer: VisualAnalyzer | null): void {
+    this.visualAnalyzer = analyzer;
   }
 
   onCursorPosition(params: CursorPositionParams): void {
@@ -74,11 +83,10 @@ export class InspectorProvider {
     this.resolveLive(params.uri, filePath, line, col, componentInfo.name, gen)
       .then((data) => {
         if (this.generation !== gen) return; // stale
-        if (data) {
-          this.sendData(data);
-        } else {
-          this.sendData(this.resolveStatic(filePath, line, col, componentInfo.name));
-        }
+        const resolved = data ?? this.resolveStatic(filePath, line, col, componentInfo.name);
+        this.sendData(resolved);
+        // Phase 2: async AI analysis (non-blocking)
+        this.resolveVisualAnalysis(params.uri, resolved, gen);
       })
       .catch(() => {
         if (this.generation !== gen) return;
@@ -156,6 +164,28 @@ export class InspectorProvider {
       renderedHtml: null,
       source: 'estimated',
     };
+  }
+
+  private async resolveVisualAnalysis(
+    uri: string,
+    data: InspectorData,
+    gen: number,
+  ): Promise<void> {
+    if (!this.visualAnalyzer || !data.screenshot) return;
+
+    const result = await this.visualAnalyzer.analyze(
+      data.screenshot,
+      data.componentName,
+      data.computedStyles,
+      data.inlineStyles,
+      data.tokenMatches ?? null,
+    );
+
+    if (this.generation !== gen || !result) return;
+
+    const enriched = { ...data, visualAnalysis: result };
+    this.sendData(enriched);
+    this.onAiAnalysis?.(uri, enriched);
   }
 
   private extractStyles(filePath: string, line: number, col: number): ComputedStyles {
