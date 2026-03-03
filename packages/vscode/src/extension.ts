@@ -34,6 +34,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     initializationOptions: {
       chromeDebugPort: config.get<number>('chromeDebugPort', 9222),
       autoConnect: config.get<boolean>('autoConnect', true),
+      tokensPath: config.get<string>('tokensPath', '') || undefined,
+      tokens: {
+        diagnostics: config.get<boolean>('tokens.diagnostics', true),
+        completions: config.get<boolean>('tokens.completions', true),
+      },
     },
   };
 
@@ -67,6 +72,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   registerCommands(context, client);
 
   await client.start();
+
+  // Now that the client is ready, give it to the inspector for edit requests
+  inspectorProvider.setClient(client);
 }
 
 export async function deactivate(): Promise<void> {

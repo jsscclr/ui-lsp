@@ -6,13 +6,15 @@ import {
   type Diagnostic,
 } from 'vscode-languageserver/node.js';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { resolve } from 'node:path';
 import {
   ConnectionStatusMethod,
   CursorPositionMethod,
   InspectorDataMethod,
+  StyleEditMethod,
   DEFAULT_CHROME_DEBUG_PORT,
 } from '@ui-ls/shared';
-import type { CursorPositionParams } from '@ui-ls/shared';
+import type { CursorPositionParams, StyleEditParams, StyleEditResult } from '@ui-ls/shared';
 import { CDPConnection } from './cdp/cdp-connection.js';
 import { SourceMapper } from './source-mapping/source-mapper.js';
 import { JsxAnalyzer } from './static/jsx-analyzer.js';
@@ -24,6 +26,9 @@ import { DiagnosticsProvider } from './diagnostics/diagnostics-provider.js';
 import { InspectorProvider } from './inspector/inspector-provider.js';
 import { CodeActionProvider } from './code-actions/code-action-provider.js';
 import { LiveDiagnosticsProvider } from './diagnostics/live-diagnostics-provider.js';
+import { CompletionProvider } from './completions/completion-provider.js';
+import { TokenLoader } from './tokens/token-loader.js';
+import { computeStyleEdit } from './inspector/style-edit-handler.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new Map<string, TextDocument>();
@@ -41,6 +46,8 @@ let liveDiagnosticsProvider: LiveDiagnosticsProvider;
 const colorProvider = new ColorProvider(jsxAnalyzer);
 const diagnosticsProvider = new DiagnosticsProvider(jsxAnalyzer);
 const codeActionProvider = new CodeActionProvider();
+const completionProvider = new CompletionProvider(jsxAnalyzer);
+let tokenLoader: TokenLoader | null = null;
 
 // Per-URI live diagnostics cache, merged with static on each publish
 const liveDiagnosticsCache = new Map<string, Diagnostic[]>();
@@ -79,10 +86,20 @@ connection.onInitialize((params): InitializeResult => {
   const settings = params.initializationOptions as {
     chromeDebugPort?: number;
     autoConnect?: boolean;
+    tokensPath?: string;
+    tokens?: { diagnostics?: boolean; completions?: boolean };
   } | undefined;
 
   const port = settings?.chromeDebugPort ?? DEFAULT_CHROME_DEBUG_PORT;
   const autoConnect = settings?.autoConnect ?? true;
+
+  // Resolve tokensPath relative to workspace root
+  const rootUri = params.rootUri ?? params.rootPath;
+  const workspaceRoot = rootUri?.startsWith('file://') ? decodeURIComponent(rootUri.slice(7)) : rootUri;
+  let tokensPath = settings?.tokensPath;
+  if (tokensPath && workspaceRoot && !tokensPath.startsWith('/')) {
+    tokensPath = resolve(workspaceRoot, tokensPath);
+  }
 
   cdpConnection = new CDPConnection(port);
   createProviders(cdpConnection);
@@ -107,6 +124,32 @@ connection.onInitialize((params): InitializeResult => {
     });
   }
 
+  // Load design tokens if configured
+  if (tokensPath) {
+    tokenLoader = new TokenLoader(tokensPath, () => {
+      // On token file reload: update providers and re-publish diagnostics
+      diagnosticsProvider.setTokenStore(tokenLoader!.store);
+      completionProvider.setTokenStore(tokenLoader!.store);
+      inspectorProvider.setTokenStore(tokenLoader!.store);
+      for (const uri of documents.keys()) {
+        publishMergedDiagnostics(uri);
+      }
+    });
+
+    tokenLoader.load().then(() => {
+      diagnosticsProvider.setTokenStore(tokenLoader!.store);
+      completionProvider.setTokenStore(tokenLoader!.store);
+      inspectorProvider.setTokenStore(tokenLoader!.store);
+      tokenLoader!.startWatching();
+      // Re-publish diagnostics for any already-open documents
+      for (const uri of documents.keys()) {
+        publishMergedDiagnostics(uri);
+      }
+    }).catch(() => {
+      // Token file not found or invalid — continue without tokens
+    });
+  }
+
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Full,
@@ -115,6 +158,7 @@ connection.onInitialize((params): InitializeResult => {
       inlayHintProvider: {},
       colorProvider: true,
       codeActionProvider: { codeActionKinds: ['quickfix'] },
+      completionProvider: { triggerCharacters: ["'", '"'] },
     },
   };
 });
@@ -226,9 +270,32 @@ connection.onCodeAction((params) => {
   return codeActionProvider.onCodeAction(params);
 });
 
+connection.onCompletion((params) => {
+  return completionProvider.onCompletion(params);
+});
+
 // Custom notification: cursor position from the extension
 connection.onNotification(CursorPositionMethod, (params: CursorPositionParams) => {
   inspectorProvider.onCursorPosition(params);
+});
+
+// Custom request: edit an inline style property from the inspector webview
+connection.onRequest(StyleEditMethod, (params: StyleEditParams): StyleEditResult => {
+  const edit = computeStyleEdit(
+    jsxAnalyzer,
+    params.uri,
+    params.line,
+    params.character,
+    params.propName,
+    params.value,
+  );
+
+  if (!edit) {
+    return { applied: false, error: 'No style attribute found at cursor position' };
+  }
+
+  // Return the TextEdit — the extension applies it via workspace.applyEdit
+  return { applied: true, edit };
 });
 
 // Custom requests for connect/disconnect commands
@@ -284,6 +351,7 @@ connection.onRequest('ui-ls/diagnose', async () => {
 
 connection.onShutdown(() => {
   cdpConnection.disconnect();
+  tokenLoader?.stopWatching();
 });
 
 connection.listen();

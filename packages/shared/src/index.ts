@@ -20,13 +20,17 @@ export type {
   FiberLookupRequest,
   FiberLookupResponse,
   CursorPositionParams,
+  InlineStyleInfo,
   InspectorData,
+  StyleEditParams,
+  StyleEditResult,
 } from './protocol.js';
 
 export {
   ConnectionStatusMethod,
   CursorPositionMethod,
   InspectorDataMethod,
+  StyleEditMethod,
 } from './protocol.js';
 
 export {

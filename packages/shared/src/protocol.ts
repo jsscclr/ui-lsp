@@ -33,6 +33,21 @@ export interface CursorPositionParams {
 
 export const CursorPositionMethod = 'ui-ls/cursorPosition' as const;
 
+/** Per-property info for inline styles written in source. */
+export interface InlineStyleInfo {
+  /** kebab-case CSS property name */
+  name: string;
+  /** camelCase name as written in source (for edits) */
+  camelName: string;
+  /** Source-authored value */
+  value: string;
+  /** Source range of the property assignment */
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+}
+
 /** Server → Client: inspector data ready for the webview. */
 export interface InspectorData {
   componentName: string;
@@ -42,9 +57,39 @@ export interface InspectorData {
   props: Record<string, unknown>;
   boxModel: BoxModelData | null;
   computedStyles: ComputedStyles;
+  /** Inline style properties with source ranges and values */
+  inlineStyles: InlineStyleInfo[];
+  /** Maps kebab-case prop name → design token path (e.g. "colors.primary") */
+  tokenMatches?: Record<string, string>;
   screenshot: string | null;
   renderedHtml: string | null;
   source: 'live' | 'estimated';
 }
 
 export const InspectorDataMethod = 'ui-ls/inspectorData' as const;
+
+/** Client → Server: edit an inline style property. */
+export interface StyleEditParams {
+  uri: string;
+  line: number;
+  character: number;
+  /** camelCase property name */
+  propName: string;
+  /** Raw value (e.g. "'absolute'" for strings, "100" for numbers) */
+  value: string;
+}
+
+export interface StyleEditResult {
+  applied: boolean;
+  error?: string;
+  /** The TextEdit to apply — range + newText (only present when applied is true). */
+  edit?: {
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    newText: string;
+  };
+}
+
+export const StyleEditMethod = 'ui-ls/editStyle' as const;
