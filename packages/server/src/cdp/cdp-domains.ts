@@ -100,9 +100,6 @@ export async function getDocument(client: CDPClient): Promise<number> {
   return result.root.nodeId;
 }
 
-const MAX_SCREENSHOT_WIDTH = 1920;
-const MAX_SCREENSHOT_HEIGHT = 1200;
-
 /** Fetch the raw CDP box model for a node. */
 export async function getRawBoxModel(
   client: CDPClient,
@@ -113,38 +110,22 @@ export async function getRawBoxModel(
 }
 
 /**
- * Capture a PNG screenshot of a single DOM element, clipped to its margin box.
- * Returns a base64-encoded PNG string, or null if the element can't be captured.
- * Accepts a pre-fetched CDPBoxModel to avoid duplicate DOM.getBoxModel calls.
+ * Capture a PNG screenshot of the visible viewport.
+ * Returns a base64-encoded PNG string, or null on failure.
  *
- * IMPORTANT: clip.scale is "Page scale factor" — setting it below 1 causes Chrome
- * to physically resize the viewport, breaking page layout. Always use scale: 1.
- * Use fromSurface to capture from the compositor without viewport side effects.
+ * We intentionally avoid using the `clip` parameter — even with scale: 1,
+ * clip rects that extend beyond the viewport cause Chrome to physically
+ * resize the viewport, breaking page layout permanently.
  */
 export async function captureElementScreenshot(
   client: CDPClient,
-  rawModel: CDPBoxModel,
+  _rawModel: CDPBoxModel,
 ): Promise<string | null> {
-  // Margin quad: [x1,y1, x2,y2, x3,y3, x4,y4] clockwise from top-left
-  const mq = rawModel.margin;
-  const x = mq[0];
-  const y = mq[1];
-  const width = mq[2] - mq[0];
-  const height = mq[5] - mq[1];
-
-  // Skip zero-size or excessively large elements
-  if (width <= 0 || height <= 0) return null;
-  if (width > MAX_SCREENSHOT_WIDTH || height > MAX_SCREENSHOT_HEIGHT) return null;
-
   try {
-    // Clear any DOM inspection highlight overlay before capturing
     await client.send('DOM.hideHighlight').catch(() => {});
 
     const result = (await client.send('Page.captureScreenshot', {
       format: 'png',
-      clip: { x, y, width, height, scale: 1 },
-      fromSurface: true,
-      captureBeyondViewport: false,
     })) as { data: string };
     return result.data;
   } catch {
