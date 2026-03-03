@@ -12,7 +12,7 @@ export function formatHoverContent(data: HoverData): string {
   parts.push(`**${data.componentInfo.name}** ${tag}\n`);
 
   // Live screenshot preview
-  if ('screenshot' in data && data.screenshot) {
+  if (data.source === 'live' && data.screenshot) {
     parts.push(`![${data.componentInfo.name}](data:image/png;base64,${data.screenshot})`);
   }
 

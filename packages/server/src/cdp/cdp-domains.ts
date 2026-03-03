@@ -2,7 +2,7 @@ import type { CDPBoxModel, CDPComputedStyleProperty, CDPRemoteObject, BoxModelDa
 import type { CDPClient } from './cdp-client.js';
 
 /** Convert CDP's flat 8-element quad arrays into structured box model data. */
-function parseBoxModel(raw: CDPBoxModel): BoxModelData {
+export function parseBoxModel(raw: CDPBoxModel): BoxModelData {
   const contentWidth = raw.width;
   const contentHeight = raw.height;
 
@@ -35,8 +35,8 @@ function parseBoxModel(raw: CDPBoxModel): BoxModelData {
 }
 
 export async function getBoxModel(client: CDPClient, nodeId: number): Promise<BoxModelData> {
-  const result = (await client.send('DOM.getBoxModel', { nodeId })) as { model: CDPBoxModel };
-  return parseBoxModel(result.model);
+  const raw = await getRawBoxModel(client, nodeId);
+  return parseBoxModel(raw);
 }
 
 export async function getComputedStyle(
@@ -103,23 +103,24 @@ export async function getDocument(client: CDPClient): Promise<number> {
 const MAX_SCREENSHOT_WIDTH = 600;
 const MAX_SCREENSHOT_HEIGHT = 400;
 
+/** Fetch the raw CDP box model for a node. */
+export async function getRawBoxModel(
+  client: CDPClient,
+  nodeId: number,
+): Promise<CDPBoxModel> {
+  const result = (await client.send('DOM.getBoxModel', { nodeId })) as { model: CDPBoxModel };
+  return result.model;
+}
+
 /**
  * Capture a PNG screenshot of a single DOM element, clipped to its margin box.
  * Returns a base64-encoded PNG string, or null if the element can't be captured.
+ * Accepts a pre-fetched CDPBoxModel to avoid duplicate DOM.getBoxModel calls.
  */
 export async function captureElementScreenshot(
   client: CDPClient,
-  nodeId: number,
+  rawModel: CDPBoxModel,
 ): Promise<string | null> {
-  // Get the raw box model — we need the margin quad for the clip rect
-  let rawModel: CDPBoxModel;
-  try {
-    const result = (await client.send('DOM.getBoxModel', { nodeId })) as { model: CDPBoxModel };
-    rawModel = result.model;
-  } catch {
-    return null;
-  }
-
   // Margin quad: [x1,y1, x2,y2, x3,y3, x4,y4] clockwise from top-left
   const mq = rawModel.margin;
   const x = mq[0];
