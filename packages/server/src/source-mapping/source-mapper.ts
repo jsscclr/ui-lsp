@@ -18,18 +18,20 @@ interface FiberResult {
  */
 export class SourceMapper {
   private fiberCache = new FiberCache<FiberResult>(100, 5_000);
+  private lookupCounter = 0;
 
   async lookupLive(
     client: CDPClient,
     filePath: string,
     line: number,
     column: number,
+    expectedName?: string,
   ): Promise<LiveHoverData | null> {
     const cacheKey = FiberCache.makeKey(filePath, line, column);
 
     let fiber: FiberResult | undefined = this.fiberCache.get(cacheKey);
     if (!fiber) {
-      const found = await this.findFiber(client, filePath, line, column);
+      const found = await this.findFiber(client, filePath, line, column, expectedName);
       if (!found) return null;
       fiber = found;
       this.fiberCache.set(cacheKey, fiber);
@@ -71,8 +73,12 @@ export class SourceMapper {
     filePath: string,
     line: number,
     column: number,
+    expectedName?: string,
   ): Promise<FiberResult | null> {
-    const expression = buildFiberLookupExpression(filePath, line, column);
+    // Unique ID prevents concurrent lookups from clobbering each other's stored elements
+    const lookupId = String(++this.lookupCounter);
+    const elKey = `__UI_LS_EL_${lookupId}__`;
+    const expression = buildFiberLookupExpression(filePath, line, column, lookupId, expectedName);
 
     // Get by-value result (props, componentName, found)
     // The expression is async (fetches source maps for React 19), so awaitPromise: true
@@ -87,12 +93,19 @@ export class SourceMapper {
     const parsed = parseFiberLookupResult(byValueResult.result.value);
     if (!parsed.found) return null;
 
-    // Get the DOM element's objectId from the global set by the lookup expression
+    // Get the DOM element's objectId from the unique global set by the lookup expression
     const elementResult = (await client.send('Runtime.evaluate', {
-      expression: 'window.__UI_LS_FOUND_ELEMENT__',
+      expression: `window['${elKey}']`,
       returnByValue: false,
       awaitPromise: false,
     })) as { result: { objectId?: string; type: string; subtype?: string } };
+
+    // Clean up the global
+    client.send('Runtime.evaluate', {
+      expression: `delete window['${elKey}']`,
+      returnByValue: true,
+      awaitPromise: false,
+    }).catch(() => {});
 
     if (!elementResult.result.objectId) return null;
 

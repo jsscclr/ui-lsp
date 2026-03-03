@@ -14,8 +14,12 @@ export function buildFiberLookupExpression(
   fileName: string,
   line: number,
   _column: number,
+  lookupId?: string,
+  expectedName?: string,
 ): string {
   const escapedFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const elKey = lookupId ? `__UI_LS_EL_${lookupId}__` : '__UI_LS_FOUND_ELEMENT__';
+  const escapedName = expectedName ? expectedName.replace(/'/g, "\\'") : '';
 
   return `(async function() {
   var hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -28,6 +32,7 @@ export function buildFiberLookupExpression(
 
   var targetFile = '${escapedFileName}'.replace(/\\\\\\\\/g, '/');
   var targetOrigLine = ${line}; // 0-based original line
+  var expectedName = '${escapedName}' || null;
 
   // --- React 18 fast path: _debugSource has direct line numbers ---
   var r18result = { found: false };
@@ -117,19 +122,35 @@ export function buildFiberLookupExpression(
   var targetGenLines = {};
   for (var i = 0; i < genLines.length; i++) targetGenLines[genLines[i] + 1] = true;
 
-  var result = { found: false };
+  // Collect ALL matching fibers, then pick the best one
+  var candidates = [];
   function walkFiber(fiber) {
-    if (!fiber || result.found) return;
+    if (!fiber) return;
     var frame = getFiberFrame(fiber);
     if (frame && frame.url === browserUrl && targetGenLines[frame.line]) {
       var el = findElement(fiber);
-      if (el) result = buildResult(fiber, el);
+      if (el) {
+        var name = fiber.type
+          ? (typeof fiber.type === 'string' ? fiber.type : (fiber.type.displayName || fiber.type.name || 'Anonymous'))
+          : 'Unknown';
+        candidates.push({ fiber: fiber, element: el, name: name });
+      }
     }
     walkFiber(fiber.child);
-    if (!result.found) walkFiber(fiber.sibling);
+    walkFiber(fiber.sibling);
   }
   hook.getFiberRoots(1).forEach(function(root) { walkFiber(root.current); });
-  return result;
+
+  if (candidates.length === 0) return { found: false };
+
+  // Prefer exact name match when expectedName is provided
+  var best = candidates[0];
+  if (expectedName && candidates.length > 1) {
+    for (var c = 0; c < candidates.length; c++) {
+      if (candidates[c].name === expectedName) { best = candidates[c]; break; }
+    }
+  }
+  return buildResult(best.fiber, best.element);
 
   // --- Helpers ---
 
@@ -162,7 +183,7 @@ export function buildFiberLookupExpression(
       ? (typeof fiber.type === 'string' ? fiber.type : (fiber.type.displayName || fiber.type.name || 'Anonymous'))
       : 'Unknown';
     // Store element in global — DOM nodes can't be JSON-serialized (circular refs)
-    window.__UI_LS_FOUND_ELEMENT__ = element;
+    window['${elKey}'] = element;
     return { found: true, props: props, componentName: name };
   }
 

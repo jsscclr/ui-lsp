@@ -11,6 +11,7 @@ interface CodeLensData {
   filePath: string;
   line: number;
   column: number;
+  componentName: string;
 }
 
 /**
@@ -34,7 +35,7 @@ export class CodeLensProvider {
     return components.map((comp) => ({
       // ts-morph returns 1-based lines; LSP uses 0-based
       range: Range.create(comp.line - 1, 0, comp.line - 1, 0),
-      data: { filePath, line: comp.line - 1, column: comp.column } satisfies CodeLensData,
+      data: { filePath, line: comp.line - 1, column: comp.column, componentName: comp.name } satisfies CodeLensData,
     }));
   }
 
@@ -55,7 +56,7 @@ export class CodeLensProvider {
     const client = this.connection.cdpClient;
     if (client) {
       try {
-        const live = await this.sourceMapper.lookupLive(client, data.filePath, data.line, data.column);
+        const live = await this.sourceMapper.lookupLive(client, data.filePath, data.line, data.column, data.componentName);
         if (live) {
           return formatCodeLensTitle(live.componentInfo.name, live.boxModel, live.computedStyles, 'live');
         }
