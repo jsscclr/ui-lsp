@@ -9,7 +9,10 @@ export default defineConfig({
       fileName: 'extension',
     },
     rollupOptions: {
-      external: ['vscode', 'vscode-languageclient', 'vscode-languageclient/node', 'node:path'],
+      external: (id) =>
+        id === 'vscode' ||
+        id.startsWith('vscode-languageclient') ||
+        id.startsWith('node:'),
     },
   },
   test: {
