@@ -25,6 +25,7 @@ export interface LiveHoverData {
   componentInfo: ComponentInfo;
   boxModel: BoxModelData;
   computedStyles: ComputedStyles;
+  screenshot?: string;
 }
 
 export interface StaticHoverData {
