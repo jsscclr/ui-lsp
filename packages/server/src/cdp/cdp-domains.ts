@@ -110,22 +110,48 @@ export async function getRawBoxModel(
 }
 
 /**
- * Capture a PNG screenshot of the visible viewport.
- * Returns a base64-encoded PNG string, or null on failure.
+ * Capture a PNG screenshot of a DOM element, cropped to its visible margin box.
+ * Returns a base64-encoded PNG string, or null if the element can't be captured.
  *
- * We intentionally avoid using the `clip` parameter — even with scale: 1,
- * clip rects that extend beyond the viewport cause Chrome to physically
- * resize the viewport, breaking page layout permanently.
+ * The clip rect is intersected with the viewport to prevent Chrome from
+ * physically resizing the viewport (which happens when clip extends beyond
+ * the visible area, permanently breaking page layout).
  */
 export async function captureElementScreenshot(
   client: CDPClient,
-  _rawModel: CDPBoxModel,
+  rawModel: CDPBoxModel,
 ): Promise<string | null> {
+  const mq = rawModel.margin;
+  const x = mq[0];
+  const y = mq[1];
+  const width = mq[2] - mq[0];
+  const height = mq[5] - mq[1];
+
+  if (width <= 0 || height <= 0) return null;
+
   try {
     await client.send('DOM.hideHighlight').catch(() => {});
 
+    // Get viewport bounds so we can constrain the clip rect
+    const metrics = (await client.send('Page.getLayoutMetrics')) as {
+      layoutViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number };
+    };
+    const vp = metrics.layoutViewport;
+    const vpRight = vp.pageX + vp.clientWidth;
+    const vpBottom = vp.pageY + vp.clientHeight;
+
+    // Clip to intersection of element margin box and visible viewport
+    const clipX = Math.max(x, vp.pageX);
+    const clipY = Math.max(y, vp.pageY);
+    const clipW = Math.min(x + width, vpRight) - clipX;
+    const clipH = Math.min(y + height, vpBottom) - clipY;
+
+    // Element is entirely off-screen
+    if (clipW <= 0 || clipH <= 0) return null;
+
     const result = (await client.send('Page.captureScreenshot', {
       format: 'png',
+      clip: { x: clipX, y: clipY, width: clipW, height: clipH, scale: 1 },
     })) as { data: string };
     return result.data;
   } catch {
