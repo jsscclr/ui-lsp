@@ -137,6 +137,9 @@ export async function captureElementScreenshot(
   if (height > MAX_SCREENSHOT_HEIGHT) scale = Math.min(scale, MAX_SCREENSHOT_HEIGHT / height);
 
   try {
+    // Clear any DOM inspection highlight overlay before capturing
+    await client.send('DOM.hideHighlight').catch(() => {});
+
     const result = (await client.send('Page.captureScreenshot', {
       format: 'png',
       clip: { x, y, width, height, scale },
