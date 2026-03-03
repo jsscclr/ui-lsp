@@ -99,3 +99,49 @@ export async function getDocument(client: CDPClient): Promise<number> {
   };
   return result.root.nodeId;
 }
+
+const MAX_SCREENSHOT_WIDTH = 600;
+const MAX_SCREENSHOT_HEIGHT = 400;
+
+/**
+ * Capture a PNG screenshot of a single DOM element, clipped to its margin box.
+ * Returns a base64-encoded PNG string, or null if the element can't be captured.
+ */
+export async function captureElementScreenshot(
+  client: CDPClient,
+  nodeId: number,
+): Promise<string | null> {
+  // Get the raw box model — we need the margin quad for the clip rect
+  let rawModel: CDPBoxModel;
+  try {
+    const result = (await client.send('DOM.getBoxModel', { nodeId })) as { model: CDPBoxModel };
+    rawModel = result.model;
+  } catch {
+    return null;
+  }
+
+  // Margin quad: [x1,y1, x2,y2, x3,y3, x4,y4] clockwise from top-left
+  const mq = rawModel.margin;
+  const x = mq[0];
+  const y = mq[1];
+  const width = mq[2] - mq[0];
+  const height = mq[5] - mq[1];
+
+  // Skip zero-size elements
+  if (width <= 0 || height <= 0) return null;
+
+  // Scale down if element exceeds max dimensions
+  let scale = 1;
+  if (width > MAX_SCREENSHOT_WIDTH) scale = Math.min(scale, MAX_SCREENSHOT_WIDTH / width);
+  if (height > MAX_SCREENSHOT_HEIGHT) scale = Math.min(scale, MAX_SCREENSHOT_HEIGHT / height);
+
+  try {
+    const result = (await client.send('Page.captureScreenshot', {
+      format: 'png',
+      clip: { x, y, width, height, scale },
+    })) as { data: string };
+    return result.data;
+  } catch {
+    return null;
+  }
+}
