@@ -11,6 +11,11 @@ export function formatHoverContent(data: HoverData): string {
   // Header
   parts.push(`**${data.componentInfo.name}** ${tag}\n`);
 
+  // Live screenshot preview
+  if ('screenshot' in data && data.screenshot) {
+    parts.push(`![${data.componentInfo.name}](data:image/png;base64,${data.screenshot})`);
+  }
+
   // Box model diagram
   if (data.boxModel) {
     parts.push(renderBoxModel(data.boxModel));
